@@ -1,9 +1,10 @@
 FROM node:14-buster
+LABEL maintainer="juandacorreo@gmail.com"
 
-LABEL MAINTAINER juandacorreo@gmail.com
+ENV NODE_ENV=production 
+ENV PORT=3000 
 
-ENV NODE_ENV=development 
-ENV PORT=3000
+
 
 ## see https://github.com/GoogleChrome/puppeteer/blob/master/docs/troubleshooting.md
 
@@ -29,11 +30,26 @@ ENV LANGUAGE es_ES.UTF-8
 # Set working directory
 RUN mkdir /app
 WORKDIR /app
-ENV HOME=/app
 
-# Install dependencies
-COPY package.json package-lock.json $HOME/
-RUN npm install
-RUN npm install pm2 -g
+# Install app dependencies
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+
+# Configure entrypoint
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# Bundle app source
+COPY . . 
+
+# Run app
 
 EXPOSE $PORT
+
+USER node
+
+# Run this app when a container is launched
+# base image entrypoint will add node command
+CMD [ "privateapi.js" ]

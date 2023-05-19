@@ -1,9 +1,10 @@
 const express = require('express')
 const app = express()
 const server = require('http').Server(app)
-const io = require('socket.io')(server)
+// const io = require('socket.io')(server)
 const cors = require('cors')
-const router = require('./routes')(io)
+// const router = require('./routes')(io)
+const router = require('./routes')
 const { loadLocutionsFiles } = require('./controllers/utils')
 
 const bodyParser = require('body-parser')
@@ -15,9 +16,9 @@ const port = process.env.port || 3000
 
 // whenever we receive a `connection` event
 // our async function is then called
-io.on('connection', async socket => {
-  console.log('Client Successfully Connected')
-})
+// io.on('connection', async socket => {
+//   console.log('Client Successfully Connected')
+// })
 
 /* bbdd config */
 require('./db')
@@ -30,7 +31,7 @@ require('./auth')
 
 app.use(cors())
 
-io.set('origins', '*:*')
+// io.set('origins', '*:*')
 app.set('etag', false)
 
 // configure and use pug for pagesRoutes (for social share)

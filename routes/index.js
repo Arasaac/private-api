@@ -10,14 +10,35 @@ const materials = require('./materials')
 // const sitemap = require('./sitemap')
 const pages = require('./pages.js')
 
-const returnRouter = io => {
-  const catalogs = require('./catalogs')(io)
+// const returnRouter = io => {
+//   const catalogs = require('./catalogs')(io)
+//   router.use('/materials', materials)
+//   router.use('/pictograms', pictograms)
+//   router.use('/locutions', locutions)
+//   router.use('/users', users)
+//   router.use('/words', words)
+//   router.use('/catalogs', catalogs)
+//   router.use('/categories', categories)
+//   router.use('/translations', translations)
+//   router.use('/keywords', keywords)
+//   router.use('/materials', materials)
+//   // router.use('/sitemap', sitemap)
+//   router.use('/pages', pages)
+
+//   router.get('/', (req, res) => {
+//     res.status(200).json({ message: 'Connected to ARASAAC private API' })
+//   })
+//   return router
+// }
+
+// module.exports = returnRouter
+
+
   router.use('/materials', materials)
   router.use('/pictograms', pictograms)
   router.use('/locutions', locutions)
   router.use('/users', users)
   router.use('/words', words)
-  router.use('/catalogs', catalogs)
   router.use('/categories', categories)
   router.use('/translations', translations)
   router.use('/keywords', keywords)
@@ -28,7 +49,5 @@ const returnRouter = io => {
   router.get('/', (req, res) => {
     res.status(200).json({ message: 'Connected to ARASAAC private API' })
   })
-  return router
-}
 
-module.exports = returnRouter
+  return router
