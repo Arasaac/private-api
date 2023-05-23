@@ -50,4 +50,4 @@ const pages = require('./pages.js')
     res.status(200).json({ message: 'Connected to ARASAAC private API' })
   })
 
-  return router
+  module.exports = router
