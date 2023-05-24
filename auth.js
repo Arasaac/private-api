@@ -13,7 +13,7 @@ const logger = require('./utils/logger')
 
 passport.use(
   new Strategy(async (token, cb) => {
-    const url = `http://auth/api/tokeninfo?access_token=${token}`
+    const url = `http://services_auth/api/tokeninfo?access_token=${token}`
     try {
       if (!token) {
         logger.debug('Authentication failed: No token!!')
