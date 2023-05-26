@@ -14,6 +14,9 @@ require('./checkEnv.js')
 
 const port = process.env.port || 3000
 
+
+logger.debug('Startup env variables:')
+logger.debug(process.env)
 // whenever we receive a `connection` event
 // our async function is then called
 // io.on('connection', async socket => {
