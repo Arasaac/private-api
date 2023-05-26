@@ -40,10 +40,12 @@ const transport = nodemailer.createTransport({
 })
 
 // remove val and an, it does not work, we will use ca
-const locales = languages.filter(language => language !== 'val' && language !== 'an')
+const locales = languages.filter(
+  language => language !== 'val' && language !== 'an'
+)
 const newEmail = new Email({
   message: {
-    from: `${EMAIL_FROM} <${EMAIL_USER}>`,
+    from: `${EMAIL_FROM} <${EMAIL_USER}>`
   },
   // uncomment below to send emails in development/test env:
   send: true,
@@ -54,20 +56,21 @@ const newEmail = new Email({
   }
 })
 
-const contactEmail = (userEmail, userName) => new Email({
-  message: {
-    /* change EMAIL_TO for EMAIL_USER for aragon.es: */
-    from: `${userName} <${EMAIL_USER}>`,
-    replyTo: userEmail
-  },
-  // uncomment below to send emails in development/test env:
-  send: true,
-  transport,
-  i18n: {
-    locales,
-    directory: path.resolve(__dirname, 'locales')
-  }
-})
+const contactEmail = (userEmail, userName) =>
+  new Email({
+    message: {
+      /* change EMAIL_TO for EMAIL_USER for aragon.es: */
+      from: `${userName} <${EMAIL_USER}>`,
+      replyTo: userEmail
+    },
+    // uncomment below to send emails in development/test env:
+    send: true,
+    transport,
+    i18n: {
+      locales,
+      directory: path.resolve(__dirname, 'locales')
+    }
+  })
 
 const sendContactMail = data =>
   new Promise((resolve, reject) => {
@@ -140,6 +143,17 @@ const sendWelcomeMail = user =>
 
 const sendPasswordRecoveryMail = (user, password) =>
   new Promise((resolve, reject) => {
+    logger.debug(
+      'email transport data: ',
+      transport.options.auth,
+      transport.options.host,
+      transport.options.port
+    )
+    logger.debug('email locales: ', locales)
+    logger.debug('email from: ', EMAIL_FROM, EMAIL_USER)
+    logger.debug('Send user email: ', user.name, user.email)
+    logger.debug('User new password: ', password)
+
     var accessUrl = ''
     if (NODE_ENV === 'development') {
       accessUrl = `${DEV_ARASAAC_URL}/signin`
@@ -170,7 +184,8 @@ const sendPasswordRecoveryMail = (user, password) =>
       .catch(error => {
         reject(
           new CustomError(
-            `Error sending password recovery email OK to ${user.email
+            `Error sending password recovery email OK to ${
+              user.email
             }: ${error}`,
             500
           )
@@ -191,7 +206,6 @@ const sendNewMaterialEmail = data =>
         template: 'tplNewMaterial',
         message: {
           to: 'arasaac@aragon.es'
-
         },
         locals: {
           name: data.emailAuthors.name,
@@ -201,20 +215,22 @@ const sendNewMaterialEmail = data =>
         // htmlToText: true
       })
       .then(() => {
-        logger.debug(`Sent new material email from user ${data.emailAuthors.email}`)
+        logger.debug(
+          `Sent new material email from user ${data.emailAuthors.email}`
+        )
         resolve()
       })
       .catch(error => {
         reject(
           new CustomError(
-            `Error sending contact email from user ${data.emailAuthors.email}: ${error}`,
+            `Error sending contact email from user ${
+              data.emailAuthors.email
+            }: ${error}`,
             500
           )
         )
       })
   })
-
-
 
 const sendTranslationEmail = data =>
   new Promise((resolve, reject) => {
@@ -228,7 +244,6 @@ const sendTranslationEmail = data =>
         template: 'tplTranslation',
         message: {
           to: 'arasaac@aragon.es'
-
         },
         locals: {
           name,
@@ -252,7 +267,6 @@ const sendTranslationEmail = data =>
         )
       })
   })
-
 
 const sendPublishedMaterialEmail = data =>
   new Promise((resolve, reject) => {
@@ -294,8 +308,8 @@ const sendPublishedMaterialEmail = data =>
       })
   })
 
-
-const getDirection = (locale) => (locale === 'ar' || locale === 'he') ? 'rtl' : 'ltr'
+const getDirection = locale =>
+  locale === 'ar' || locale === 'he' ? 'rtl' : 'ltr'
 
 module.exports = {
   sendWelcomeMail,
