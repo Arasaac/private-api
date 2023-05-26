@@ -6,6 +6,7 @@ const cors = require('cors')
 // const router = require('./routes')(io)
 const router = require('./routes')
 const { loadLocutionsFiles } = require('./controllers/utils')
+const logger = require('./utils/logger')
 
 const bodyParser = require('body-parser')
 
