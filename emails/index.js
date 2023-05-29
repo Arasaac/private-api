@@ -40,6 +40,10 @@ const transport = nodemailer.createTransport({
   logger: true
 })
 
+
+logger.debug (`Sendind email with user "${EMAIL_USER}" and password "${EMAIL_PASSWORD}" through "${EMAIL_SMTP}" and port 465`)
+
+
 // remove val and an, it does not work, we will use ca
 const locales = languages.filter(
   language => language !== 'val' && language !== 'an'
