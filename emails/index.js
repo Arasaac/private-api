@@ -10,6 +10,7 @@ const {
   EMAIL_USER,
   EMAIL_PASSWORD,
   EMAIL_SMTP,
+  EMAIL_PORT,
   NODE_ENV
 } = process.env
 
@@ -28,20 +29,20 @@ const {
 // Arasaac es una marca registrada por.....
 
 const transport = nodemailer.createTransport({
-  host: "appmail.aragon.es",
-  port: 465,
+  host: EMAIL_SMTP,
+  port: EMAIL_PORT,
   secure: true, // upgrade later with STARTTLS
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASSWORD
   },
   // requireTLS: true,
-  debug: true,
-  logger: true
+  debug: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
+  logger: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
 })
 
 
-logger.debug (`Sendind email with user "${EMAIL_USER}" and password "${EMAIL_PASSWORD}" through "${EMAIL_SMTP}" and port 465`)
+logger.debug (`Sendind email with user "${EMAIL_USER}" and password "${EMAIL_PASSWORD}" through "${EMAIL_SMTP}" and port ${EMAIL_PORT}`)
 
 
 // remove val and an, it does not work, we will use ca
@@ -148,17 +149,6 @@ const sendWelcomeMail = user =>
 
 const sendPasswordRecoveryMail = (user, password) =>
   new Promise((resolve, reject) => {
-    logger.debug(
-      'email transport data: ',
-      transport.options.auth,
-      transport.options.host,
-      transport.options.port
-    )
-    logger.debug('email locales: ', locales)
-    logger.debug('email from: ', EMAIL_FROM, EMAIL_USER)
-    logger.debug('Send user email: ', user.name, user.email)
-    logger.debug('User new password: ', password)
-
     var accessUrl = ''
     if (NODE_ENV === 'development') {
       accessUrl = `${DEV_ARASAAC_URL}/signin`
