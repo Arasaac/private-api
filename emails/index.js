@@ -28,15 +28,16 @@ const {
 // Arasaac es una marca registrada por.....
 
 const transport = nodemailer.createTransport({
-  host: EMAIL_SMTP,
-  port: 587,
-  secure: false, // upgrade later with STARTTLS
+  host: "appmail.aragon.es",
+  port: 465,
+  secure: true, // upgrade later with STARTTLS
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASSWORD
   },
-  requireTLS: true,
-  debug: true
+  // requireTLS: true,
+  debug: true,
+  logger: true
 })
 
 // remove val and an, it does not work, we will use ca
