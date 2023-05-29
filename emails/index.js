@@ -11,6 +11,7 @@ const {
   EMAIL_PASSWORD,
   EMAIL_SMTP,
   EMAIL_PORT,
+  LOG_LEVEL,
   NODE_ENV
 } = process.env
 
