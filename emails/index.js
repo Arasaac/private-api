@@ -38,8 +38,8 @@ const transport = nodemailer.createTransport({
     pass: EMAIL_PASSWORD
   },
   // requireTLS: true,
-  debug: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
-  logger: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
+  // debug: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
+  // logger: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
 })
 
 
