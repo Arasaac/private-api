@@ -673,7 +673,7 @@ const postCustomPictogramFromBase64 = async (req, res) => {
   fileName = `${randomize('Aa0', 10)}-${filenamify(fileName, {
     replacement: ''
   }) || 'image'}.png`
-  const destFileName = path.resolve(IMAGE_DIR, fileName)
+  const destFileName = path.resolve(IMAGE_DIR, 'tmp', fileName)
 
   try {
     await fs.writeFile(destFileName, base64Data, 'base64')
@@ -690,7 +690,7 @@ const postCustomPictogramFromBase64 = async (req, res) => {
 
 const getCustomPictogramByName = (req, res) => {
   const { fileName } = req.params
-  const destFileName = `${IMAGE_DIR}/${fileName}`
+  const destFileName = `${IMAGE_DIR}/tmp/${fileName}`
   logger.debug(`EXEC getCustomPictogramByName for fileName ${fileName}`)
   try {
     const newFileName = fileName.substring(fileName.indexOf('-') + 1)
