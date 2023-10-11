@@ -4,6 +4,7 @@ const languages = [
   'bg',
   'br',
   'ca',
+  'cs',
   'de',
   'el',
   'en',
