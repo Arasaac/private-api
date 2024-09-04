@@ -16,6 +16,8 @@
   "bg": "בולגרית",
   "br": "פורטוגזית ברזילאית",
   "ca": "קטלאנית",
+  "cs": "צ'כית",
+  "da": "דנית",
   "de": "גרמנית",
   "el": "יווני",
   "en": "אנגלית",
@@ -45,6 +47,5 @@
   "ko": "Korean",
   "lt": "Lithuanian",
   "uk": "Ukrainian",
-  "nb": "Norwegian",
-  "cs": "Czech"
+  "nb": "Norwegian"
 }

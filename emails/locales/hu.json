@@ -16,6 +16,8 @@
   "bg": "Bolgár",
   "br": "Brazíliai portugál",
   "ca": "Katalán",
+  "cs": "Cseh",
+  "da": "Dán",
   "de": "Német",
   "el": "Görög",
   "en": "Angol",
@@ -45,6 +47,5 @@
   "ko": "Korean",
   "lt": "Lithuanian",
   "uk": "Ukrainian",
-  "nb": "Norwegian",
-  "cs": "Czech"
+  "nb": "Norwegian"
 }
