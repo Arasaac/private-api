@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "DEBUG=email-templates nodemon --verbose --inspect=0.0.0.0:9229 --ignore '*.json' --ignore 'materials/' --ignore 'conjugations/' --ignore 'locutions/' --ignore 'svg/' --ignore 'tmpSVG' --ignore 'pictograms/' --trace-deprecation privateapi.js",
+    "start": "DEBUG=email-templates nodemon --legacy-watch --verbose --inspect=0.0.0.0:9229 --ignore '*.json' --ignore 'materials/' --ignore 'conjugations/' --ignore 'locutions/' --ignore 'svg/' --ignore 'tmpSVG' --ignore 'pictograms/' --trace-deprecation privateapi.js",
     "serve": "pm2-runtime start ecosystem.config.js",
     "precommit": "lint-staged"
   },

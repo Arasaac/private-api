@@ -1,7 +1,8 @@
 const mongoose = require('mongoose')
 const MONGO_DB_USER = process.env.MONGO_DB_USER
 const MONGO_DB_PWD = process.env.MONGO_DB_PWD
-const databaseUrl = `mongodb://${MONGO_DB_USER}:${MONGO_DB_PWD}@backend_mongodb/arasaac?authSource=admin`
+const MONGO_DB_HOST = process.env.MONGO_DB_HOST
+const databaseUrl = `mongodb://${MONGO_DB_USER}:${MONGO_DB_PWD}@${MONGO_DB_HOST}/arasaac?authSource=admin`
 const logger = require('./utils/logger')
 
 mongoose.Promise = global.Promise
