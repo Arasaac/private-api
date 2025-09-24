@@ -33,13 +33,13 @@ ENV PORT=3000
 # Actualizar repositorios antiguos de Buster y permitir instalar Chrome - VER EXPLICACIÓN ANTERIOR!!!!
 RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list \
  && sed -i '/deb.*security.*buster/ s/^/#/' /etc/apt/sources.list \
+ && sed -i '/deb.*buster-updates/ s/^/#/' /etc/apt/sources.list \
  && apt-get -o Acquire::Check-Valid-Until=false update \
  && apt-get install -y wget gnupg \
  && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
  && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
  && apt-get -o Acquire::Check-Valid-Until=false update \
- && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-    --no-install-recommends \
+ && apt-get install -y google-chrome-stable ... \
  && rm -rf /var/lib/apt/lists/*
 
 
