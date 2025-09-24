@@ -52,4 +52,4 @@ USER node
 
 # Run this app when a container is launched
 # base image entrypoint will add node command
-CMD [ "privateapi.js" ]
+CMD ["--max-old-space-size=8192", "privateapi.js"]
