@@ -1,56 +1,60 @@
 const fs = require('fs-extra')
 const path = require('path')
 const languages = require('../utils/languages')
-const puppeteer = require('puppeteer')
-const cheerio = require('cheerio')
+// const puppeteer = require('puppeteer')
+// const cheerio = require('cheerio')
 const CustomError = require('../utils/CustomError')
 const logger = require('../utils/logger')
 const { PAST, PRESENT, FUTURE } = require('./constants')
 const _ = require('lodash')
-const { CONJUGATIONS_DIR, LOCUTIONS_DIR, MATERIAL_DIR } = require('../utils/constants')
+const {
+  CONJUGATIONS_DIR,
+  LOCUTIONS_DIR,
+  MATERIAL_DIR,
+} = require('../utils/constants')
 
 const saveFiles = async (files, dir, newName) => {
   await fs.ensureDir(dir)
   if (Array.isArray(files)) {
     return Promise.all(
-      files.map(file => {
+      files.map((file) => {
         const destDir = path.resolve(dir, newName || file.name)
         return fs.move(file.path, destDir, { overwrite: true })
-      })
+      }),
     )
   }
   const destDir = path.resolve(dir, newName || files.name)
   return fs.move(files.path, destDir, { overwrite: true })
 }
 
-const getUrl = (language, word) => {
-  const verbixCodeLanguages = {
-    ru: 214,
-    ro: 5,
-    es: 1,
-    pt: 2,
-    fr: 3,
-    ca: 7,
-    ga: 6,
-    ar: 61,
-    pl: 201,
-    it: 4,
-    de: 13,
-    en: 20,
-    cr: 204,
-    nl: 24
-  }
-  const languageCode = verbixCodeLanguages[language]
-  if (!languageCode) {
-    throw new CustomError(
-      `Can't get ${word} conjugation in language ${language}. Availabe languages: ${Object.keys(
-        verbixCodeLanguages
-      ).join(', ')} `,
-      404
-    )
-  }
-  return `http://www.verbix.com/webverbix/go.php?T1=${word}&D1=${languageCode}`
-}
+// const getUrl = (language, word) => {
+//   const verbixCodeLanguages = {
+//     ru: 214,
+//     ro: 5,
+//     es: 1,
+//     pt: 2,
+//     fr: 3,
+//     ca: 7,
+//     ga: 6,
+//     ar: 61,
+//     pl: 201,
+//     it: 4,
+//     de: 13,
+//     en: 20,
+//     cr: 204,
+//     nl: 24
+//   }
+//   const languageCode = verbixCodeLanguages[language]
+//   if (!languageCode) {
+//     throw new CustomError(
+//       `Can't get ${word} conjugation in language ${language}. Availabe languages: ${Object.keys(
+//         verbixCodeLanguages
+//       ).join(', ')} `,
+//       404
+//     )
+//   }
+//   return `http://www.verbix.com/webverbix/go.php?T1=${word}&D1=${languageCode}`
+// }
 const saveFilesByType = async (formFiles, id) => {
   // const filePromises = []
   let filesPromise
@@ -63,41 +67,41 @@ const saveFilesByType = async (formFiles, id) => {
   if (formFiles.files) {
     filesPromise = saveFiles(
       formFiles.files,
-      path.resolve(MATERIAL_DIR, `${id}`)
+      path.resolve(MATERIAL_DIR, `${id}`),
     )
   }
 
   if (formFiles.screenshots) {
     screenshotsPromise = saveFiles(
       formFiles.screenshots,
-      path.resolve(MATERIAL_DIR, `${id}`, 'screenshots')
+      path.resolve(MATERIAL_DIR, `${id}`, 'screenshots'),
     )
   }
 
-  const langFiles = Object.keys(formFiles).filter(key =>
-    langFilesPattern.test(key)
+  const langFiles = Object.keys(formFiles).filter((key) =>
+    langFilesPattern.test(key),
   )
 
-  const langFilesPromises = langFiles.map(langFile => {
+  const langFilesPromises = langFiles.map((langFile) => {
     const locale = langFile.substr(0, langFile.indexOf('_files'))
     return saveFiles(
       formFiles[langFile],
-      path.resolve(MATERIAL_DIR, `${id}`, locale)
+      path.resolve(MATERIAL_DIR, `${id}`, locale),
     )
   })
 
-  const langScreenshotsFiles = Object.keys(formFiles).filter(key =>
-    langScreenshotsPattern.test(key)
+  const langScreenshotsFiles = Object.keys(formFiles).filter((key) =>
+    langScreenshotsPattern.test(key),
   )
 
-  const langScreenshotsPromises = langScreenshotsFiles.map(langScreenshot => {
+  const langScreenshotsPromises = langScreenshotsFiles.map((langScreenshot) => {
     const locale = langScreenshot.substr(
       0,
-      langScreenshot.indexOf('_screenshots')
+      langScreenshot.indexOf('_screenshots'),
     )
     return saveFiles(
       formFiles[langScreenshot],
-      path.resolve(MATERIAL_DIR, `${id}`, 'screenshots', locale)
+      path.resolve(MATERIAL_DIR, `${id}`, 'screenshots', locale),
     )
   })
 
@@ -105,126 +109,127 @@ const saveFilesByType = async (formFiles, id) => {
     filesPromise,
     screenshotsPromise,
     ...langFilesPromises,
-    ...langScreenshotsPromises
+    ...langScreenshotsPromises,
   ])
 }
 
-const checkTense = (language, tense) => {
-  switch (tense) {
-    case 'Perfect':
-    case 'Perfet': // ca
-    case 'Perfeito': // pt
-    case 'Imperfect': // en
-    case 'Imparfait': // fr
-    case 'Imperfet': // ca
-    case 'Imperfeito': // pt
-    case 'Mais-que-perfeito': // pt
-    case 'Pretérito': // pt
-    case 'Condicional perfeito': // pt
-    case 'Past':
-    case 'Passé': // fr
-    case 'Passé simple': // fr
-    case 'Passat simple': // ca
-    case 'Pluperfect':
-    case 'Preterite':
-    case 'Preterite Perfect':
-    case 'Passé composé': // fr
-    case 'Passé antérieur': // fr
-    case 'Passat anterior': // ca
-    case 'Passat perifràstic': // ca
-    case 'Passat anterior perifràstic': // ca
-    case 'Passat anterior perifràsticr': // ca bug, last r!
-    case 'Condicional perfet': // ca
-    case 'Plus-que-parfait': // fr
-    case 'Plusquamperfet': // ca
-    case 'Passato prossimo': // it
-    case 'Passato': // it
-    case 'Imperfetto': // it
-    case 'Trapassato prossimo': // it
-    case 'Passato remoto': // it
-    case 'Trapassato remoto': // it
-      return PAST
-    case 'Future':
-    case 'Futuro': // pt, it
-    case 'Futuro anterior': // pt
-    case 'Futuro anteriore': // it
-    case 'Futur simple': // fr, ca
-    case 'Futur antérieur': // fr
-    case 'Future I': // de
-    case 'Future II': // de
-    case 'Future Perfect':
-    case 'Futur perfet': // ca
-      return FUTURE
-    default:
-      return PRESENT
-  }
-}
+// const checkTense = (language, tense) => {
+//   switch (tense) {
+//     case 'Perfect':
+//     case 'Perfet': // ca
+//     case 'Perfeito': // pt
+//     case 'Imperfect': // en
+//     case 'Imparfait': // fr
+//     case 'Imperfet': // ca
+//     case 'Imperfeito': // pt
+//     case 'Mais-que-perfeito': // pt
+//     case 'Pretérito': // pt
+//     case 'Condicional perfeito': // pt
+//     case 'Past':
+//     case 'Passé': // fr
+//     case 'Passé simple': // fr
+//     case 'Passat simple': // ca
+//     case 'Pluperfect':
+//     case 'Preterite':
+//     case 'Preterite Perfect':
+//     case 'Passé composé': // fr
+//     case 'Passé antérieur': // fr
+//     case 'Passat anterior': // ca
+//     case 'Passat perifràstic': // ca
+//     case 'Passat anterior perifràstic': // ca
+//     case 'Passat anterior perifràsticr': // ca bug, last r!
+//     case 'Condicional perfet': // ca
+//     case 'Plus-que-parfait': // fr
+//     case 'Plusquamperfet': // ca
+//     case 'Passato prossimo': // it
+//     case 'Passato': // it
+//     case 'Imperfetto': // it
+//     case 'Trapassato prossimo': // it
+//     case 'Passato remoto': // it
+//     case 'Trapassato remoto': // it
+//       return PAST
+//     case 'Future':
+//     case 'Futuro': // pt, it
+//     case 'Futuro anterior': // pt
+//     case 'Futuro anteriore': // it
+//     case 'Futur simple': // fr, ca
+//     case 'Futur antérieur': // fr
+//     case 'Future I': // de
+//     case 'Future II': // de
+//     case 'Future Perfect':
+//     case 'Futur perfet': // ca
+//       return FUTURE
+//     default:
+//       return PRESENT
+//   }
+// }
 
-const getVerbixConjugations = async (language, word) => {
-  let result = {}
-  let verbs = []
-  let tiempo
-  let modo
-  const browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    timeout: 3000000
-  })
-  // if language is russian get word as verbix wants it
+// const getVerbixConjugations = async (language, word) => {
+//   let result = {}
+//   let verbs = []
+//   let tiempo
+//   let modo
+//   const browser = await puppeteer.launch({
+//     args: ['--no-sandbox', '--disable-setuid-sandbox'],
+//     timeout: 3000000
+//   })
+//   // if language is russian get word as verbix wants it
 
-  const page = await browser.newPage()
-  await page.goto(getUrl(language, word))
-  const content = await page.content()
-  const $ = cheerio.load(content)
+//   const page = await browser.newPage()
+//   await page.goto(getUrl(language, word))
+//   const content = await page.content()
+//   const $ = cheerio.load(content)
 
-  $('.columns-main>div').each(function (i, element) {
-    modo = $('h3', element).text()
-    if (modo) {
-      if (modo === 'Nominal Forms') {
-        $('.normal, .orto, .irregular', element).each((i, verb) => {
-          const verbo = $(verb).text()
-          verbs = verbo.split(' - ')
-          if (!result[modo]) result[modo] = {}
-          if (!result[modo][i]) result[modo][i] = {}
-          result[modo][i] = {
-            verbs,
-            considered: checkTense(language, i)
-          }
-          verbs = []
-        })
-      } else {
-        $('.columns-sub>div', this).each(function (i, element) {
-          tiempo = $('h4', element).text()
-          if (tiempo) {
-            $('.normal, .orto, .irregular', this).each((i, verb) => {
-              verbs.push($(verb).text())
-            })
-            if (!result[modo]) result[modo] = {}
-            if (!result[modo][tiempo]) result[modo][tiempo] = {}
-            result[modo][tiempo] = {
-              verbs: verbs,
-              considered: checkTense(language, tiempo)
-            }
-          }
-          verbs = []
-          tiempo = ''
-        })
-      }
-    }
-  })
-  await browser.close()
-  // if empty verbalTenses, throw error:
-  if (Object.entries(result).length === 0 && result.constructor === Object) {
-    throw new CustomError(
-      `Can't get conjugations for verb ${word} in language ${language}`,
-      404
-    )
-  }
-  return { word, language, verbTenses: result }
-}
+//   $('.columns-main>div').each(function (i, element) {
+//     modo = $('h3', element).text()
+//     if (modo) {
+//       if (modo === 'Nominal Forms') {
+//         $('.normal, .orto, .irregular', element).each((i, verb) => {
+//           const verbo = $(verb).text()
+//           verbs = verbo.split(' - ')
+//           if (!result[modo]) result[modo] = {}
+//           if (!result[modo][i]) result[modo][i] = {}
+//           result[modo][i] = {
+//             verbs,
+//             considered: checkTense(language, i)
+//           }
+//           verbs = []
+//         })
+//       } else {
+//         $('.columns-sub>div', this).each(function (i, element) {
+//           tiempo = $('h4', element).text()
+//           if (tiempo) {
+//             $('.normal, .orto, .irregular', this).each((i, verb) => {
+//               verbs.push($(verb).text())
+//             })
+//             if (!result[modo]) result[modo] = {}
+//             if (!result[modo][tiempo]) result[modo][tiempo] = {}
+//             result[modo][tiempo] = {
+//               verbs: verbs,
+//               considered: checkTense(language, tiempo)
+//             }
+//           }
+//           verbs = []
+//           tiempo = ''
+//         })
+//       }
+//     }
+//   })
+//   await browser.close()
+//   // if empty verbalTenses, throw error:
+//   if (Object.entries(result).length === 0 && result.constructor === Object) {
+//     throw new CustomError(
+//       `Can't get conjugations for verb ${word} in language ${language}`,
+//       404
+//     )
+//   }
+//   return { word, language, verbTenses: result }
+// }
 
 const getConjugationsFile = (language, word) =>
   path.resolve(CONJUGATIONS_DIR, language, `${word}.json`)
-const getConjugationsDir = language => path.resolve(CONJUGATIONS_DIR, language)
+const getConjugationsDir = (language) =>
+  path.resolve(CONJUGATIONS_DIR, language)
 
 const readConjugations = async (language, word) => {
   const conjugationsFile = getConjugationsFile(language, word)
@@ -234,7 +239,7 @@ const readConjugations = async (language, word) => {
     return conjugations
   } catch (err) {
     logger.info(
-      `No file for conjugations found for verb ${word} and language ${language}. We'll ask verbix`
+      `No file for conjugations found for verb ${word} and language ${language}. We'll ask verbix`,
     )
     return false
   }
@@ -243,11 +248,11 @@ const readConjugations = async (language, word) => {
 // get verbs for a verbalTense (PRESENT, PAST, FUTURE) in a json data (verbs)
 const getDeclinations = (verbalTense, verbs) =>
   _.flattenDeep(
-    Object.values(verbs.verbTenses).map(tenses =>
+    Object.values(verbs.verbTenses).map((tenses) =>
       Object.values(tenses)
-        .filter(tense => tense.considered === verbalTense)
-        .map(tense => tense.verbs)
-    )
+        .filter((tense) => tense.considered === verbalTense)
+        .map((tense) => tense.verbs),
+    ),
   )
 
 const saveConjugations = async (language, word, content) => {
@@ -256,11 +261,11 @@ const saveConjugations = async (language, word, content) => {
     await fs.ensureDir(getConjugationsDir(language))
     await fs.writeJson(conjugationsFile, content)
     logger.debug(
-      `Saved conjugations file for verb ${word} and language ${language}`
+      `Saved conjugations file for verb ${word} and language ${language}`,
     )
   } catch (err) {
     logger.error(
-      `Can't save conjugations file for verb ${word} and language ${language}: ${err.message}`
+      `Can't save conjugations file for verb ${word} and language ${language}: ${err.message}`,
     )
   }
 }
@@ -277,7 +282,9 @@ const loadLocutionsFiles = () => {
       })
       logger.debug(`Loaded locutions files for ${language} language`)
     } catch (e) {
-      logger.warn(`No directory for language ${language}: ${e.message}. We don't get locutions`)
+      logger.warn(
+        `No directory for language ${language}: ${e.message}. We don't get locutions`,
+      )
       locutions[language] = []
     }
   })
@@ -289,9 +296,9 @@ const loadLocutionsFiles = () => {
 module.exports = {
   saveFiles,
   saveFilesByType,
-  getVerbixConjugations,
+  // getVerbixConjugations,
   readConjugations,
   saveConjugations,
   getDeclinations,
-  loadLocutionsFiles
+  loadLocutionsFiles,
 }

@@ -17,7 +17,7 @@ router.put(
   passport.authenticate('bearer', { session: false }),
   (req, res) => {
     usersController.changePassword(req, res)
-  }
+  },
 )
 
 router.put(
@@ -27,7 +27,7 @@ router.put(
   ownThisData(),
   (req, res) => {
     usersController.update(req, res)
-  }
+  },
 )
 
 router.get('/activate/:code', (req, res) => {
@@ -40,7 +40,7 @@ router.get(
   hasRole('admin'),
   (req, res) => {
     usersController.getAll(req, res)
-  }
+  },
 )
 
 router.get(
@@ -48,7 +48,7 @@ router.get(
   passport.authenticate('bearer', { session: false }),
   (req, res) => {
     usersController.getUserByEmail(req, res)
-  }
+  },
 )
 
 router.get(
@@ -57,15 +57,12 @@ router.get(
   hasRole('admin'),
   (req, res) => {
     usersController.getAllByDate(req, res)
-  }
+  },
 )
 
-router.get(
-  '/authors',
-  (req, res) => {
-    usersController.getAuthors(req, res)
-  }
-)
+router.get('/authors', (req, res) => {
+  usersController.getAuthors(req, res)
+})
 
 router.get(
   '/:id',
@@ -73,7 +70,7 @@ router.get(
   hasRole('admin'),
   (req, res) => {
     usersController.findOne(req, res)
-  }
+  },
 )
 
 router.get(
@@ -82,15 +79,12 @@ router.get(
   hasRole('user'),
   (req, res) => {
     usersController.getFavorites(req, res)
-  }
+  },
 )
 
-router.get(
-  '/favorites/:id/:listName',
-  (req, res) => {
-    usersController.downloadFavoriteList(req, res)
-  }
-)
+router.get('/favorites/:id/:listName', (req, res) => {
+  usersController.downloadFavoriteList(req, res)
+})
 
 router.post(
   '/favorites',
@@ -98,7 +92,7 @@ router.post(
   hasRole('user'),
   (req, res) => {
     usersController.addFavorite(req, res)
-  }
+  },
 )
 
 router.delete(
@@ -107,7 +101,7 @@ router.delete(
   hasRole('user'),
   (req, res) => {
     usersController.deleteFavorite(req, res)
-  }
+  },
 )
 
 router.post(
@@ -116,7 +110,7 @@ router.post(
   hasRole('user'),
   (req, res) => {
     usersController.addFavoriteList(req, res)
-  }
+  },
 )
 
 router.delete(
@@ -125,7 +119,7 @@ router.delete(
   hasRole('user'),
   (req, res) => {
     usersController.deleteFavoriteList(req, res)
-  }
+  },
 )
 
 router.put(
@@ -134,7 +128,7 @@ router.put(
   hasRole('user'),
   (req, res) => {
     usersController.renameFavoriteList(req, res)
-  }
+  },
 )
 
 /* set passwordlessToken so user then can get a token */

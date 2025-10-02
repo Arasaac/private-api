@@ -1,6 +1,7 @@
 const express = require('express')
 const app = express()
 const server = require('http').Server(app)
+// removed socket-io 2.5.0
 // const io = require('socket.io')(server)
 const cors = require('cors')
 // const router = require('./routes')(io)
@@ -15,15 +16,12 @@ require('./checkEnv.js')
 
 const port = process.env.port || 3000
 
-
-
 logger.debug('Startup env variables:')
 for (let key in process.env) {
   if (process.env.hasOwnProperty(key)) {
-    logger.debug(`${key}: ${process.env[key]}`);
+    logger.debug(`${key}: ${process.env[key]}`)
   }
 }
-
 
 // whenever we receive a `connection` event
 // our async function is then called
@@ -46,8 +44,8 @@ app.use(cors())
 app.set('etag', false)
 
 // configure and use pug for pagesRoutes (for social share)
-app.set('views', './views')
-app.set('view engine', 'pug')
+// app.set('views', './views')
+// app.set('view engine', 'pug')
 
 // const locutionsFiles = loadLocutionsFiles()
 
