@@ -262,18 +262,35 @@ const getAll = (req, res) => {
   }
 }
 
-const getAllByDate = async (req, res) => {
+const getAllByDate = (req, res) => {
   const { date } = req.params
   logger.debug(`Getting data from all users updated after ${date} `)
-  const query = date ? { updated: { $gte: date } } : {}
+
+  // Construcción del query: si hay date, filtra; si no, todos
+  const query = date ? { updated: { $gte: new Date(date) } } : {}
+
+  res.status(200)
+  res.setHeader('Content-Type', 'application/json')
+
   try {
-    const users = await User.find(
+    const cursor = User.find(
       query,
       '-password -idAuthor -authToken -google -facebook -favorites',
-    )
-    return res.status(200).json(users)
+    ).cursor()
+
+    cursor.pipe(JSONStream.stringify()).pipe(res)
+
+    cursor.on('error', (err) => {
+      logger.error(`Cursor error: ${err.message}`)
+      if (!res.headersSent) {
+        res.status(500).end()
+      }
+    })
   } catch (err) {
-    return res.status(500).json(err)
+    logger.error(`Error getting data from users by date: ${err.message}`)
+    if (!res.headersSent) {
+      res.status(500).json(err)
+    }
   }
 }
 
