@@ -7,7 +7,30 @@ const getSyntax = async (req, res) => {
   const { phrase } = req.params
 
   try {
-    const url = `http://backend_freeling:5000/syntax?frase=${encodeURIComponent(phrase)}`
+    const url = `http://backend_freelingv2:5000/syntax?frase=${encodeURIComponent(phrase)}`
+    const { data } = await axios.get(url, {
+      headers: { Accept: 'application/json' },
+      timeout: 5000, // opcional
+    })
+
+    return res.json(data)
+  } catch (error) {
+    logger.error(
+      `Error getting getSyntax for phrase "${phrase}". See error: ${error.message}`,
+    )
+    return res.status(500).json({
+      error: error.message,
+    })
+  }
+}
+
+const getFlex = async (req, res) => {
+  logger.debug('EXEC getFlex phraseController')
+
+  const { phrase } = req.params
+
+  try {
+    const url = `http://backend_freelingv2:5000/flexionar?frase=${encodeURIComponent(phrase)}`
     const { data } = await axios.get(url, {
       headers: { Accept: 'application/json' },
       timeout: 5000, // opcional
@@ -26,4 +49,5 @@ const getSyntax = async (req, res) => {
 
 module.exports = {
   getSyntax,
+  getFlex,
 }
