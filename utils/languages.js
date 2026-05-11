@@ -19,6 +19,7 @@ const languages = [
   'hr',
   'hu',
   'it',
+  'is',
   'ko',
   'lt',
   'lv',
@@ -37,7 +38,7 @@ const languages = [
   'tr',
   'uk',
   'val',
-  'zh'
+  'zh',
 ]
 
 module.exports = languages
