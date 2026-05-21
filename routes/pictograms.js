@@ -26,11 +26,15 @@ router.post(
   hasRole('user'),
   (req, res) => {
     pictogramsController.getPictogramsById(req, res)
-  }
+  },
 )
 
 router.get('/:locale/search/:searchText', (req, res) => {
   pictogramsController.searchPictograms(req, res)
+})
+
+router.get('/:locale/searchByTags/:searchText', (req, res) => {
+  pictogramsController.searchPictogramsByTags(req, res)
 })
 
 router.get('/:locale/:_id', (req, res) => {
@@ -66,7 +70,7 @@ router.put(
   hasRole('translator'),
   (req, res) => {
     pictogramsController.update(req, res)
-  }
+  },
 )
 
 router.delete(
@@ -75,7 +79,7 @@ router.delete(
   hasRole('admin'),
   (req, res) => {
     pictogramsController.remove(req, res)
-  }
+  },
 )
 
 router.post(
@@ -84,7 +88,7 @@ router.post(
   hasRole('admin'),
   (req, res) => {
     pictogramsController.upload(req, res)
-  }
+  },
 )
 
 module.exports = router

@@ -21,7 +21,7 @@ const Pictograms = languages.reduce((dict, language) => {
   return dict
 }, {})
 
-const isEmptyObject = obj =>
+const isEmptyObject = (obj) =>
   Object.entries(obj).length === 0 && obj.constructor === Object
 
 // similar to getNewPictograms (publicApi) but with time instead of days
@@ -29,11 +29,11 @@ const isEmptyObject = obj =>
 const getPictogramsFromDate = async (req, res) => {
   const { lastUpdated, locale } = req.params
   logger.debug(
-    `EXEC getPictogramsFromData with lastUpdated ${lastUpdated} and locale ${locale}`
+    `EXEC getPictogramsFromData with lastUpdated ${lastUpdated} and locale ${locale}`,
   )
   try {
     const pictograms = await Pictograms[locale].find({
-      lastUpdated: { $gt: new Date(lastUpdated) }
+      lastUpdated: { $gt: new Date(lastUpdated) },
     })
     if (pictograms.length === 0) return res.status(404).json([]) // send http code 404!!!
     return res.json(pictograms)
@@ -41,7 +41,7 @@ const getPictogramsFromDate = async (req, res) => {
     logger.error(`Error searching pictogram ${err}`)
     return res.status(500).json({
       message: 'Error searching pictogram. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -49,7 +49,8 @@ const getPictogramsFromDate = async (req, res) => {
 const downloadPictogram = async (req, res) => {
   const { fileName, keyword, color } = req.params
   const newName = keyword === null ? fileName : keyword
-  const fileEncodedName = color === 'false' ? `${fileName}_nocolor_500.png`: `${fileName}_500.png`
+  const fileEncodedName =
+    color === 'false' ? `${fileName}_nocolor_500.png` : `${fileName}_500.png`
   logger.debug(`EXEC downloadPictogram for filename: ${fileEncodedName}`)
   const filePath = path.resolve(IMAGE_DIR, fileName, `${fileEncodedName}`)
   const exists = await fs.pathExists(filePath)
@@ -66,100 +67,108 @@ const searchPictograms = async (req, res) => {
   /* first we search by id or syncset, then by exact match (also plulral), categories and textScore */
 
   const locale = req.params.locale
-  const fullSearchText  = req.params.searchText.toLowerCase()
+  const fullSearchText = req.params.searchText.toLowerCase()
   const searchText = stopWords(fullSearchText, locale)
 
-  logger.debug(`EXEC searchPictograms with locale ${locale} and searchText ${fullSearchText}`)
-
+  logger.debug(
+    `EXEC searchPictograms with locale ${locale} and searchText ${fullSearchText}`,
+  )
 
   try {
     let pictogramsById
     if (isNaN(fullSearchText)) {
       pictogramsById = await Pictograms[locale]
         .find({
-          synsets: fullSearchText
+          synsets: fullSearchText,
         })
         .select({ __v: 0 })
         .lean()
     } else {
       pictogramsById = await Pictograms[locale]
         .find({
-          _id: fullSearchText
+          _id: fullSearchText,
         })
         .select({ __v: 0 })
         .lean()
     }
 
-
     let pictogramsByKeyword = await Pictograms[locale]
       .find({
         $or: [
           {
-            'keywords.keyword': fullSearchText
+            'keywords.keyword': fullSearchText,
           },
           {
-            'keywords.plural': fullSearchText
-          }
-        ]
+            'keywords.plural': fullSearchText,
+          },
+        ],
       })
       .select({ __v: 0 })
       .lean()
 
-      const category = await Category.findOne({ locale }, { _id: 0 })
-      let weightPictos = []
-      if (category) {
-        const nodes = jp.nodes(category.data, '$..keywords');
-        const categories = nodes
-          .filter(node => node.value.some(keyword => removeDiacritics(stopWords(keyword, locale)).toLowerCase() === removeDiacritics(stopWords(fullSearchText, locale))))
-          .map(node=>node.path[node.path.length -2])
-        if (categories.length) {
-          const subCategories = []
-          categories.forEach(categoryItem => {
-            const partialData = jp.value(category.data, `$..["${categoryItem}"]`)
-            const newCategories = getSubcategories(partialData, [categoryItem])
-            newCategories.forEach(element => {
-              subCategories.push(element)
-            });
+    const category = await Category.findOne({ locale }, { _id: 0 })
+    let weightPictos = []
+    if (category) {
+      const nodes = jp.nodes(category.data, '$..keywords')
+      const categories = nodes
+        .filter((node) =>
+          node.value.some(
+            (keyword) =>
+              removeDiacritics(stopWords(keyword, locale)).toLowerCase() ===
+              removeDiacritics(stopWords(fullSearchText, locale)),
+          ),
+        )
+        .map((node) => node.path[node.path.length - 2])
+      if (categories.length) {
+        const subCategories = []
+        categories.forEach((categoryItem) => {
+          const partialData = jp.value(category.data, `$..["${categoryItem}"]`)
+          const newCategories = getSubcategories(partialData, [categoryItem])
+          newCategories.forEach((element) => {
+            subCategories.push(element)
           })
+        })
 
-          pictogramsByCategory = await Pictograms[locale]
-            .find({
-              categories: { $in: subCategories }
-            })
-            .select({ __v: 0 })
-            .lean()
-          
-          const onlySubcategories = subCategories.filter(subCategory => categories.indexOf(subCategory) === -1)
-          weightPictos = pictogramsByCategory.map(picto => {          
-            let score = categories.reduce((accumulator, currentValue)=>{
-                const position = picto.categories.indexOf(currentValue) +1
-                return position ? accumulator + 1000 / position : accumulator
-              }, 0)
-            score = onlySubcategories.reduce((accumulator, currentValue)=>{
-                const position = picto.categories.indexOf(currentValue) + 1 
-                return position ? accumulator + 500 / position : accumulator
-              }, score)
-            score = score + picto.categories.length
-            return  { ...picto, score}
+        pictogramsByCategory = await Pictograms[locale]
+          .find({
+            categories: { $in: subCategories },
           })
-          weightPictos.sort((a, b) =>b.score - a.score)
-          weightPictos.forEach(picto => delete picto.score)
-        }
+          .select({ __v: 0 })
+          .lean()
+
+        const onlySubcategories = subCategories.filter(
+          (subCategory) => categories.indexOf(subCategory) === -1,
+        )
+        weightPictos = pictogramsByCategory.map((picto) => {
+          let score = categories.reduce((accumulator, currentValue) => {
+            const position = picto.categories.indexOf(currentValue) + 1
+            return position ? accumulator + 1000 / position : accumulator
+          }, 0)
+          score = onlySubcategories.reduce((accumulator, currentValue) => {
+            const position = picto.categories.indexOf(currentValue) + 1
+            return position ? accumulator + 500 / position : accumulator
+          }, score)
+          score = score + picto.categories.length
+          return { ...picto, score }
+        })
+        weightPictos.sort((a, b) => b.score - a.score)
+        weightPictos.forEach((picto) => delete picto.score)
       }
+    }
 
     /* if  category, we don't look by text */
-    let pictogramsByText  = []
-    if ((!weightPictos.length)) {
+    let pictogramsByText = []
+    if (!weightPictos.length) {
       pictogramsByText = await Pictograms[locale]
         .find(
           {
             $text: {
               $search: searchText,
               $language: 'none',
-              $diacriticSensitive: false
-            }
+              $diacriticSensitive: false,
+            },
           },
-          { score: { $meta: 'textScore' } }
+          { score: { $meta: 'textScore' } },
         )
         .select({ __v: 0 })
         .lean()
@@ -172,56 +181,57 @@ const searchPictograms = async (req, res) => {
       ...pictogramsById,
       ...pictogramsByKeyword,
       ...weightPictos,
-      ...pictogramsByText
+      ...pictogramsByText,
     ]
 
-
-        // if  no results we try by  phonemes (no more than five letters)
-    if (pictograms.length === 0 && fullSearchText.length>1 && fullSearchText.length<6) {
-
-        pictograms = await Pictograms[locale]
-          .find(
+    // if  no results we try by  phonemes (no more than five letters)
+    if (
+      pictograms.length === 0 &&
+      fullSearchText.length > 1 &&
+      fullSearchText.length < 6
+    ) {
+      pictograms = await Pictograms[locale]
+        .find({
+          $or: [
             {
-              $or: [
-                {
-                  'keywords.keyword': new RegExp(fullSearchText)
-                },
-                {
-                  'keywords.plural': new RegExp(fullSearchText)
-                }
-              ]
-            }
-          )
-          .select({ __v: 0 })
-          .lean()
+              'keywords.keyword': new RegExp(fullSearchText),
+            },
+            {
+              'keywords.plural': new RegExp(fullSearchText),
+            },
+          ],
+        })
+        .select({ __v: 0 })
+        .lean()
     }
 
-    const uniquePictograms = Array.from(new Set(pictograms.map(pictogram => pictogram._id))).map(_id => pictograms.find(a => a._id === _id))
+    const uniquePictograms = Array.from(
+      new Set(pictograms.map((pictogram) => pictogram._id)),
+    ).map((_id) => pictograms.find((a) => a._id === _id))
 
     if (uniquePictograms.length === 0) return res.status(404).json([])
     logger.debug(`Found ${uniquePictograms.length} pictograms`)
     return res.json(uniquePictograms)
   } catch (err) {
-    logger.error(`Error getting pictograms with locale ${locale} and searchText ${fullSearchText}. See error: ${err}`)
+    logger.error(
+      `Error getting pictograms with locale ${locale} and searchText ${fullSearchText}. See error: ${err}`,
+    )
     return res.status(500).json({
       message: 'Error getting pictograms. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
 
 const getSubcategories = (tree, categories) => {
-  if (tree.children && Object.keys(tree.children).length !== 0 ) {
-    return Object.entries(tree.children).reduce(
-      (accumulator, currentValue) => {
-        if (currentValue[0]) categories.push(currentValue[0])
-        return getSubcategories(currentValue[1], categories)
-      }, [])
+  if (tree.children && Object.keys(tree.children).length !== 0) {
+    return Object.entries(tree.children).reduce((accumulator, currentValue) => {
+      if (currentValue[0]) categories.push(currentValue[0])
+      return getSubcategories(currentValue[1], categories)
+    }, [])
   }
   return categories
 }
-
-
 
 const getAll = async (req, res) => {
   const { locale } = req.params
@@ -234,7 +244,7 @@ const getAll = async (req, res) => {
     logger.error(`Error getting all pictograms ${err} `)
     return res.status(500).json({
       message: 'Error getting pictograms. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -252,11 +262,11 @@ const getPictogramById = async (req, res) => {
     return res.json(pictogram)
   } catch (err) {
     logger.error(
-      `Error getting pictogram with id ${_id} and locale ${locale}.See error: ${err} `
+      `Error getting pictogram with id ${_id} and locale ${locale}.See error: ${err} `,
     )
     return res.status(500).json({
       message: 'Error getting pictograms. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -267,31 +277,33 @@ const getPictogramsById = async (req, res) => {
   const { locale } = req.params
   const favoriteIds = [].concat.apply([], req.body.favoriteIds)
   logger.debug(
-    `EXEC getPictogramByIds with ids ${favoriteIds} and locale ${locale} `
+    `EXEC getPictogramByIds with ids ${favoriteIds} and locale ${locale} `,
   )
   try {
     const pictograms = await Pictograms[locale].find(
       {
         _id: { $in: favoriteIds },
-        published: true
+        published: true,
       },
-      { published: 0, validated: 0, available: 0, __v: 0 }
+      { published: 0, validated: 0, available: 0, __v: 0 },
     )
-    logger.debug(`Search pictogram with id ${favoriteIds} and locale ${locale} `)
+    logger.debug(
+      `Search pictogram with id ${favoriteIds} and locale ${locale} `,
+    )
     if (!pictograms.length) {
       logger.debug(
-        `Not found pictograms with ids ${favoriteIds} and locale ${locale} `
+        `Not found pictograms with ids ${favoriteIds} and locale ${locale} `,
       )
       return res.json([])
     }
     return res.json(pictograms)
   } catch (err) {
     logger.error(
-      `Error getting pictogram with id ${favoriteIds} and locale ${locale}.See error: ${err} `
+      `Error getting pictogram with id ${favoriteIds} and locale ${locale}.See error: ${err} `,
     )
     return res.status(500).json({
       message: 'Error getting pictograms. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -312,11 +324,11 @@ const upload = async (req, res, next) => {
       /* filter only *.svg files with numeric basename */
       const targetFiles = svgFiles
         .filter(
-          file =>
+          (file) =>
             path.extname(file).toLowerCase() === EXTENSION &&
-            !isNaN(path.basename(file, EXTENSION))
+            !isNaN(path.basename(file, EXTENSION)),
         )
-        .map(file => path.basename(file, EXTENSION))
+        .map((file) => path.basename(file, EXTENSION))
       let number = Math.max(...targetFiles)
       let i = 1
       // can upload one file or more... when just one we don't receive an array.
@@ -339,22 +351,22 @@ const upload = async (req, res, next) => {
           // we delete previousely so modified svg can get new pngs
           const idPicto = path.basename(file.name, EXTENSION)
           const fileExists = await fs.pathExists(
-            path.resolve(SVG_DIR, file.name)
+            path.resolve(SVG_DIR, file.name),
           )
           if (fileExists) {
             logger.debug(
               `Removing previous file and associated pngs ${path.resolve(
                 SVG_DIR,
-                file.name
-              )}`
+                file.name,
+              )}`,
             )
             await fs.remove(path.resolve(SVG_DIR, file.name))
             await fs.remove(path.resolve(IMAGE_DIR, idPicto))
             logger.debug(
               `Removed OK previous file and associated pngs ${path.resolve(
                 SVG_DIR,
-                file.name
-              )}`
+                file.name,
+              )}`,
             )
             await saveFiles(file, SVG_DIR)
             logger.debug(`Updated OK file ${file.name}`)
@@ -369,18 +381,18 @@ const upload = async (req, res, next) => {
         }
       }
       if (pictograms.length) {
-        const allPictograms = pictograms.map(pictogram => {
+        const allPictograms = pictograms.map((pictogram) => {
           pictogram.skin = hasSkin(pictogram._id)
           pictogram.hair = hasHair(pictogram._id)
         })
         // if new, we insert them into all picto collections
         for (const language of languages) {
           logger.debug(
-            `Inserting new pictograms into mongodb with language ${language}`
+            `Inserting new pictograms into mongodb with language ${language}`,
           )
           await Pictograms[language].insertMany(pictograms)
           logger.debug(
-            `Inserted OK new pictograms into mongodb with language ${language}`
+            `Inserted OK new pictograms into mongodb with language ${language}`,
           )
         }
       }
@@ -389,7 +401,7 @@ const upload = async (req, res, next) => {
       logger.error(`ERROR executing upload: ${err}`)
       return res.status(500).json({
         message: 'Error uploading pictograms',
-        error: err
+        error: err,
       })
     }
   })
@@ -401,8 +413,8 @@ const update = async (req, res) => {
 
   logger.debug(
     `EXEC update with locale ${locale}, pictogram ${JSON.stringify(
-      pictogram
-    )}, _id: ${_id}`
+      pictogram,
+    )}, _id: ${_id}`,
   )
 
   /* first we test auth for translators */
@@ -413,7 +425,7 @@ const update = async (req, res) => {
     logger.debug(`Role is translator but can't translate to ${locale}`)
     return res.status(403).json({
       message: 'Error getting user data',
-      error: `Role is translator but can't translat to ${locale} language`
+      error: `Role is translator but can't translat to ${locale} language`,
     })
   }
 
@@ -430,7 +442,7 @@ const update = async (req, res) => {
     'aac',
     'aacColor',
     'skin',
-    'hair'
+    'hair',
   ]
 
   const globalUpdate = {}
@@ -442,18 +454,18 @@ const update = async (req, res) => {
     if (!Pictogram) {
       throw new CustomError(
         `No pictogram found with id: ${_id} for locale: ${locale}`,
-        404
+        404,
       )
     }
 
     // if keyword == null we remove it
-    const keywords = pictogram.keywords.filter(keyword => keyword !== null)
+    const keywords = pictogram.keywords.filter((keyword) => keyword !== null)
     if (!isArrayEqual(keywords, Pictogram.keywords)) {
       const locutionsFiles = req.app.get('locutionsFiles')
-      specificUpdate.keywords = keywords.map(keyword => {
+      specificUpdate.keywords = keywords.map((keyword) => {
         if (
           locutionsFiles[locale].indexOf(
-            keyword.keyword.toString().toLowerCase()
+            keyword.keyword.toString().toLowerCase(),
           ) === -1
         ) {
           keyword.hasLocution = false
@@ -481,7 +493,7 @@ const update = async (req, res) => {
     if (!isEmptyObject(specificUpdate) || !isEmptyObject(globalUpdate)) {
       Object.assign(specificUpdate, globalUpdate, { lastUpdated: now })
       logger.debug(
-        `Updating general pictogram data into mongodb with language ${locale}`
+        `Updating general pictogram data into mongodb with language ${locale}`,
       )
       var modifiedPictogram = await Pictograms[locale]
         .findByIdAndUpdate(_id, specificUpdate, { new: true })
@@ -504,12 +516,12 @@ const update = async (req, res) => {
       for (const language of languages) {
         if (language === locale) continue
         logger.debug(
-          `Updating general pictogram data into mongodb with language ${language}`
+          `Updating general pictogram data into mongodb with language ${language}`,
         )
 
         await Pictograms[language].findOneAndUpdate({ _id }, globalUpdate)
         logger.debug(
-          `Update OK pictogram into mongodb with language ${language}`
+          `Update OK pictogram into mongodb with language ${language}`,
         )
       }
     }
@@ -520,7 +532,7 @@ const update = async (req, res) => {
     logger.error(`Error updating pictogram: ${err.message}`)
     return res.status(err.httpCode || 500).json({
       message: 'Error updating pictogram. See error field for detail',
-      error: err.message
+      error: err.message,
     })
   }
 }
@@ -529,7 +541,7 @@ const update = async (req, res) => {
 const getPictogramsIdBySearch = async (req, res) => {
   const { locale, searchText } = req.params
   logger.debug(
-    `EXEC getPictogramsIdBySearch with locale ${locale} and searchText ${searchText}`
+    `EXEC getPictogramsIdBySearch with locale ${locale} and searchText ${searchText}`,
   )
   const filterSearchText = stopWords(searchText, locale)
   try {
@@ -539,21 +551,21 @@ const getPictogramsIdBySearch = async (req, res) => {
           $text: {
             $search: filterSearchText,
             $language: 'none',
-            $diacriticSensitive: false
-          }
+            $diacriticSensitive: false,
+          },
         },
-        { score: { $meta: 'textScore' }, _id: 1, authors: 1 }
+        { score: { $meta: 'textScore' }, _id: 1, authors: 1 },
       )
       .sort({ score: { $meta: 'textScore' } })
     if (pictograms.length === 0) return res.status(404).json([])
     return res.json(pictograms)
   } catch (err) {
     logger.error(
-      `Error executing getPictogramsIdBySearch with locale ${locale} and searchText ${searchText}: ${err}`
+      `Error executing getPictogramsIdBySearch with locale ${locale} and searchText ${searchText}: ${err}`,
     )
     return res.status(500).json({
       message: 'Error getting pictogram keywords. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -561,28 +573,28 @@ const getPictogramsIdBySearch = async (req, res) => {
 const getKeywordsById = async (req, res) => {
   const { _id, locale } = req.params
   logger.debug(
-    `EXEC getKeywordsById for pictogram id ${_id} and locale ${locale}`
+    `EXEC getKeywordsById for pictogram id ${_id} and locale ${locale}`,
   )
   try {
     const pictogram = await Pictograms[locale].findOne(
       {
-        _id
+        _id,
       },
-      { keywords: 1 }
+      { keywords: 1 },
     )
     if (!pictogram) {
       logger.debug(`Pictogram with id ${_id} not found`)
       return res.status(404).json([])
     }
     if (pictogram && pictogram.keywords) {
-      const keywords = pictogram.keywords.map(keyword => ({
+      const keywords = pictogram.keywords.map((keyword) => ({
         keyword: keyword.keyword,
-        type: keyword.type
+        type: keyword.type,
       }))
       logger.debug(
         `Keywords pictogram id ${_id}: ${keywords
-          .map(keyword => keyword.keyword)
-          .join()}`
+          .map((keyword) => keyword.keyword)
+          .join()}`,
       )
       return res.status(200).json({ keywords: pictogram.keywords })
     } else {
@@ -591,11 +603,11 @@ const getKeywordsById = async (req, res) => {
     }
   } catch (err) {
     logger.error(
-      `Error executing getKeywordsById with id ${_id} and locale ${locale}: ${err}`
+      `Error executing getKeywordsById with id ${_id} and locale ${locale}: ${err}`,
     )
     return res.status(500).json({
       message: 'Error getting pictograms. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -603,21 +615,21 @@ const getKeywordsById = async (req, res) => {
 const getTypesById = async (req, res) => {
   const { _id } = req.params
   logger.debug(
-    `EXEC getYpesById for pictogram id ${_id} searching in es locale`
+    `EXEC getYpesById for pictogram id ${_id} searching in es locale`,
   )
   try {
     const pictogram = await Pictograms['es'].findOne(
       {
-        _id
+        _id,
       },
-      { keywords: 1, _id: 0 }
+      { keywords: 1, _id: 0 },
     )
     if (!pictogram) {
       logger.debug(`Pictogram with id ${_id} not found`)
       return res.status(404).json([])
     }
     if (pictogram && pictogram.keywords) {
-      const foundTypes = pictogram.keywords.map(keyword => keyword.type)
+      const foundTypes = pictogram.keywords.map((keyword) => keyword.type)
       const types = Array.from(new Set(foundTypes))
       return res.status(200).json({ types })
     } else {
@@ -629,7 +641,7 @@ const getTypesById = async (req, res) => {
     // TODO: return err o err.messsage?????
     return res.status(500).json({
       message: 'Error getting pictograms. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -644,14 +656,14 @@ const remove = async (req, res) => {
       logger.debug(`Deleted pictogram id ${_id} in language ${language}`)
     }
     logger.debug(
-      `Deleting svg and png files if exist for pictogram with id ${_id}`
+      `Deleting svg and png files if exist for pictogram with id ${_id}`,
     )
     await Promise.all([
       fs.remove(path.resolve(SVG_DIR, `${_id}.svg`)),
-      fs.remove(path.resolve(IMAGE_DIR, _id))
+      fs.remove(path.resolve(IMAGE_DIR, _id)),
     ])
     logger.debug(
-      `Deleted svg and png files if exist for pictogram with id ${_id}`
+      `Deleted svg and png files if exist for pictogram with id ${_id}`,
     )
     return res.status(204).json()
   } catch (err) {
@@ -659,7 +671,7 @@ const remove = async (req, res) => {
     // TODO: return err o err.messsage?????
     return res.status(500).json({
       message: 'Error removing pictogram. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -670,9 +682,11 @@ const remove = async (req, res) => {
 const postCustomPictogramFromBase64 = async (req, res) => {
   let { fileName, base64Data } = req.body
   base64Data = base64Data.replace(/^data:image\/png;base64,/, '')
-  fileName = `${randomize('Aa0', 10)}-${filenamify(fileName, {
-    replacement: ''
-  }) || 'image'}.png`
+  fileName = `${randomize('Aa0', 10)}-${
+    filenamify(fileName, {
+      replacement: '',
+    }) || 'image'
+  }.png`
   const destFileName = path.resolve(IMAGE_DIR, 'tmp', fileName)
 
   try {
@@ -683,7 +697,7 @@ const postCustomPictogramFromBase64 = async (req, res) => {
     console.log(err)
     return res.status(500).json({
       message: 'Error generating pictogram. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -699,7 +713,7 @@ const getCustomPictogramByName = (req, res) => {
     logger.error(`ERROR getCustomPictogramByName for fileName ${fileName}`)
     return res.status(500).json({
       message: 'Error getting pictogram. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
@@ -716,17 +730,14 @@ const getLocutionById = (req, res) => {
     console.log(err)
     return res.status(500).json({
       message: 'Error getting locution. See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
 
 const isArrayEqual = (x, y) => {
-  return _(x)
-    .xorWith(y, _.isEqual)
-    .isEmpty()
+  return _(x).xorWith(y, _.isEqual).isEmpty()
 }
-
 
 const skin = {
   white: '#F5E5DE',
@@ -734,7 +745,7 @@ const skin = {
   assian: '#F4ECAD',
   mulatto: '#E3AB72',
   aztec: '#CF9D7C',
-  schematic: '#FEFEFE'
+  schematic: '#FEFEFE',
 }
 const hair = {
   brown: '#A65E26',
@@ -743,34 +754,83 @@ const hair = {
   black: '#020100',
   gray: '#EFEFEF',
   darkGray: '#AAABAB',
-  darkBrown: '#6A2703'
+  darkBrown: '#6A2703',
 }
 
 const skins = `${skin.white}|${skin.schematic}`
 
 const hasSkin = (id) => {
-   // important ! regex without -g option because it's acumulative between interations
+  // important ! regex without -g option because it's acumulative between interations
   // see http://2ality.com/2013/08/regexp-g.html
   let reSkin = new RegExp(skins, 'gim')
-  const str = fs.readFileSync(`${SVG_DIR}/${id}.svg`).toString();
-  return reSkin.test(str);
+  const str = fs.readFileSync(`${SVG_DIR}/${id}.svg`).toString()
+  return reSkin.test(str)
 }
 
 const hairToRemove = () => {
   let value = ''
-  Object.keys(hair).forEach(function(key) {
+  Object.keys(hair).forEach(function (key) {
     value += `${hair[key]}|`
   })
   return value.slice(0, -1)
 }
 
-
 const hasHair = (id) => {
   const reHair = new RegExp(hairToRemove(), 'gim')
-  const str = fs.readFileSync(`${SVG_DIR}/${id}.svg`).toString();
-  return reHair.test(str);
+  const str = fs.readFileSync(`${SVG_DIR}/${id}.svg`).toString()
+  return reHair.test(str)
 }
 
+const searchPictogramsByTags = async (req, res) => {
+  const { locale, searchText } = req.params
+  logger.debug(
+    `EXEC searchPictogramsByTags with locale ${locale} and searchText ${searchText}`,
+  )
+  const fullSearchText = searchText.toLowerCase()
+
+  try {
+    const tagsQuery = req.query.tags
+    let tags = []
+    if (tagsQuery) {
+      if (Array.isArray(tagsQuery)) {
+        tags = tagsQuery
+      } else if (typeof tagsQuery === 'string') {
+        tags = tagsQuery
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      }
+    }
+
+    const query = {
+      $or: [
+        { 'keywords.keyword': fullSearchText },
+        { 'keywords.plural': fullSearchText },
+      ],
+    }
+
+    if (tags.length > 0) {
+      query.tags = { $all: tags }
+    }
+
+    const pictograms = await Pictograms[locale]
+      .find(query)
+      .select({ __v: 0 })
+      .lean()
+
+    if (pictograms.length === 0) return res.status(404).json([])
+    logger.debug(`Found ${pictograms.length} pictograms by tags search`)
+    return res.json(pictograms)
+  } catch (err) {
+    logger.error(
+      `Error executing searchPictogramsByTags with locale ${locale} and searchText ${searchText}: ${err}`,
+    )
+    return res.status(500).json({
+      message: 'Error searching pictograms by tags. See error field for detail',
+      error: err,
+    })
+  }
+}
 
 module.exports = {
   getPictogramsFromDate,
@@ -786,6 +846,7 @@ module.exports = {
   update,
   upload,
   searchPictograms,
+  searchPictogramsByTags,
   downloadPictogram,
-  remove
+  remove,
 }
