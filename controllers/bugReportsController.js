@@ -157,7 +157,7 @@ const create = async (req, res) => {
 const webhook = async (req, res) => {
   logger.debug('EXEC webhook bugReportsController')
 
-  const { token, root_id, text, user_id, user_name } = req.body
+  const { token, root_id, post_id, text, user_id, user_name } = req.body
 
   // 1. Verify token to secure the webhook
   if (process.env.MATTERMOST_WEBHOOK_TOKEN) {
@@ -170,17 +170,41 @@ const webhook = async (req, res) => {
     }
   }
 
-  // 2. We only care about replies, which have a root_id
-  if (!root_id) {
+  let rootId = root_id
+
+  // Mattermost Outgoing Webhooks do not send root_id directly in the payload.
+  // We resolve it using the post_id by fetching the post details from Mattermost.
+  if (!rootId && post_id) {
+    try {
+      const postResponse = await axios.get(
+        `${process.env.MATTERMOST_URL}/api/v4/posts/${post_id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.MATTERMOST_TOKEN}`,
+          },
+        },
+      )
+      if (postResponse.data && postResponse.data.root_id) {
+        rootId = postResponse.data.root_id
+      }
+    } catch (err) {
+      logger.error(
+        `Error resolving root_id from post ${post_id}: ${err.message}`,
+      )
+    }
+  }
+
+  // 2. We only care about replies, which have a rootId
+  if (!rootId) {
     logger.debug('Ignoring root post webhook call')
     return res.status(200).json({ status: 'ignored' })
   }
 
   try {
     // 3. Find the original bug report
-    const bugReport = await BugReport.findOne({ postId: root_id })
+    const bugReport = await BugReport.findOne({ postId: rootId })
     if (!bugReport) {
-      logger.warn(`No bug report found matching postId: ${root_id}`)
+      logger.warn(`No bug report found matching postId: ${rootId}`)
       return res.status(404).json({ error: 'Bug report not found' })
     }
 
@@ -192,7 +216,7 @@ const webhook = async (req, res) => {
     let replierEmail = ''
     try {
       const threadResponse = await axios.get(
-        `${mattermostUrl}/api/v4/posts/${root_id}/thread`,
+        `${mattermostUrl}/api/v4/posts/${rootId}/thread`,
         {
           headers: {
             Authorization: `Bearer ${mattermostToken}`,
