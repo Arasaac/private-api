@@ -26,6 +26,10 @@ const BugReportSchema = new Schema(
       type: String,
       trim: true,
     },
+    fileIds: {
+      type: [String],
+      default: [],
+    },
     created: {
       type: Date,
       default: Date.now,

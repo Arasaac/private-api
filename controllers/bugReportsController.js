@@ -115,6 +115,7 @@ const create = async (req, res) => {
       userName: name,
       activityName,
       description,
+      fileIds: fileIds,
     })
     await bugReport.save()
 
@@ -158,35 +159,114 @@ const webhook = async (req, res) => {
       return res.status(404).json({ error: 'Bug report not found' })
     }
 
-    // 4. Fetch the replier details from Mattermost to get their email
     const mattermostUrl = process.env.MATTERMOST_URL
     const mattermostToken = process.env.MATTERMOST_TOKEN
 
+    // 4. Fetch the entire thread from Mattermost to construct conversation history
+    let conversation = []
     let replierEmail = ''
-    let replierName = user_name
-
     try {
-      const response = await axios.get(
-        `${mattermostUrl}/api/v4/users/${user_id}`,
+      const threadResponse = await axios.get(
+        `${mattermostUrl}/api/v4/posts/${root_id}/thread`,
         {
           headers: {
             Authorization: `Bearer ${mattermostToken}`,
           },
         },
       )
-      if (response.data) {
-        replierEmail = response.data.email
-        replierName = response.data.first_name
-          ? `${response.data.first_name} ${response.data.last_name || ''}`.trim()
-          : response.data.username
+
+      if (
+        threadResponse.data &&
+        threadResponse.data.order &&
+        threadResponse.data.posts
+      ) {
+        // Fetch user profiles for all unique userIds in the thread
+        const userIds = [
+          ...new Set(
+            Object.values(threadResponse.data.posts).map((p) => p.user_id),
+          ),
+        ]
+        const userMap = {}
+
+        await Promise.all(
+          userIds.map(async (id) => {
+            try {
+              const userRes = await axios.get(
+                `${mattermostUrl}/api/v4/users/${id}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${mattermostToken}`,
+                  },
+                },
+              )
+              userMap[id] = userRes.data.first_name
+                ? `${userRes.data.first_name} ${userRes.data.last_name || ''}`.trim()
+                : userRes.data.username
+
+              if (id === user_id) {
+                replierEmail = userRes.data.email
+              }
+            } catch (err) {
+              logger.error(`Error fetching user ${id}: ${err.message}`)
+              userMap[id] = id === user_id ? user_name : 'Usuario'
+            }
+          }),
+        )
+
+        // Order the conversation chronologically (Mattermost returns newest first)
+        conversation = threadResponse.data.order
+          .slice()
+          .reverse()
+          .map((postId) => {
+            const post = threadResponse.data.posts[postId]
+            return {
+              author: userMap[post.user_id] || 'Usuario',
+              text: post.message,
+              date: new Date(post.create_at).toLocaleString('es-ES'),
+            }
+          })
       }
-    } catch (apiError) {
+    } catch (threadError) {
       logger.error(
-        `Failed to fetch user info from Mattermost: ${apiError.message}`,
+        `Error fetching thread from Mattermost: ${threadError.message}`,
       )
+      // Fallback if thread fetch fails
+      conversation = [
+        {
+          author: user_name,
+          text: text,
+          date: new Date().toLocaleString('es-ES'),
+        },
+      ]
     }
 
-    // 5. Send email copy to the original writer, with CC to the replier
+    // 5. Download attachments if the original report had screenshots
+    const attachments = []
+    if (bugReport.fileIds && bugReport.fileIds.length > 0) {
+      for (const fileId of bugReport.fileIds) {
+        try {
+          const fileResponse = await axios.get(
+            `${mattermostUrl}/api/v4/files/${fileId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${mattermostToken}`,
+              },
+              responseType: 'arraybuffer',
+            },
+          )
+          attachments.push({
+            filename: `screenshot_${fileId}.jpg`,
+            content: Buffer.from(fileResponse.data),
+          })
+        } catch (fileErr) {
+          logger.error(
+            `Error downloading file ${fileId} from Mattermost: ${fileErr.message}`,
+          )
+        }
+      }
+    }
+
+    // 6. Send email copy to the original writer, with CC to the replier
     if (bugReport.userEmail) {
       await emails.sendBugReportReplyMail({
         toEmail: bugReport.userEmail,
@@ -195,9 +275,11 @@ const webhook = async (req, res) => {
         replyText: text,
         originalDescription: bugReport.description,
         activityName: bugReport.activityName,
+        conversation,
+        attachments,
       })
       logger.info(
-        `Sent bug report reply email from ${replierEmail} to ${bugReport.userEmail}`,
+        `Sent bug report reply email from ${replierEmail} to ${bugReport.userEmail} with ${attachments.length} attachments`,
       )
     } else {
       logger.warn(
