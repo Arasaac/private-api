@@ -104,8 +104,9 @@ const create = async (req, res) => {
     }
 
     // 2. Construct Mattermost post message
+    const appName = app === 'arawrite' ? 'AraWrite' : 'ARActivities'
     const message =
-      `### 🐛 Nuevo Reporte de ARActivities\n\n` +
+      `### 🐛 Nuevo Reporte de ${appName}\n\n` +
       `**👤 Usuario:** ${name}\n` +
       `**📧 Email:** ${email}\n` +
       `**🏷️ Actividad:** ${activityName}\n` +
@@ -150,6 +151,7 @@ const create = async (req, res) => {
       description,
       fileIds: fileIds,
       locale: locale,
+      app,
     })
     await bugReport.save()
 
