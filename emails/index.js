@@ -317,6 +317,7 @@ const sendBugReportReplyMail = (data) =>
       originalDescription,
       activityName,
       attachments,
+      locale,
     } = data
 
     // Construct message options
@@ -336,7 +337,7 @@ const sendBugReportReplyMail = (data) =>
         message: messageOptions,
         locals: {
           name: toName,
-          locale: 'es',
+          locale: locale || 'es',
           replyText,
           originalDescription,
           activityName,
