@@ -96,15 +96,15 @@ const create = async (req, res) => {
     }
 
     // 2. Construct Mattermost post message
-    const userLine = `**User:** ${name} (${email})\n`
     const message =
-      `### 🐛 New Bug Report: ARActivities\n` +
-      userLine +
-      `**Activity:** ${activityName}\n` +
-      `**Language:** ${metadata.language}\n` +
-      `**URL:** ${metadata.url}\n` +
-      `**Browser:** ${metadata.userAgent}\n\n` +
-      `**Description:**\n${description}`
+      `### 🐛 Nuevo Reporte de ARActivities\n\n` +
+      `**👤 Usuario:** ${name}\n` +
+      `**📧 Email:** ${email}\n` +
+      `**🏷️ Actividad:** ${activityName}\n` +
+      `**🌐 Idioma:** ${metadata.language}\n` +
+      `**🔗 URL:** ${metadata.url}\n` +
+      `**💻 Navegador:** ${metadata.userAgent}\n\n` +
+      `**📝 Descripción:**\n${description}`
 
     // 3. Create Mattermost post
     const postResponse = await fetch(
