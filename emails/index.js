@@ -316,11 +316,13 @@ const sendBugReportReplyMail = (data) =>
       replyText,
       originalDescription,
       activityName,
+      attachments,
     } = data
 
     // Construct message options
     const messageOptions = {
       to: `${toName} <${toEmail}>`,
+      attachments,
     }
 
     // If ccEmail is provided and is different from toEmail, add it to CC
