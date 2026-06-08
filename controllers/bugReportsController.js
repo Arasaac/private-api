@@ -50,6 +50,7 @@ const create = async (req, res) => {
   try {
     let email = null
     let name = 'Usuario de ARASAAC'
+    let locale = 'es'
 
     if (req.user && req.user.id) {
       try {
@@ -57,6 +58,7 @@ const create = async (req, res) => {
         if (dbUser) {
           email = dbUser.email
           name = dbUser.name
+          locale = dbUser.locale || locale
         }
       } catch (dbErr) {
         logger.error(`Error loading user from DB: ${dbErr.message}`)
@@ -66,6 +68,12 @@ const create = async (req, res) => {
     if (!email && metadata && metadata.user) {
       email = metadata.user.email
       name = metadata.user.name || name
+    }
+
+    if (metadata && metadata.language) {
+      if (!req.user || !req.user.id) {
+        locale = metadata.language
+      }
     }
 
     if (!email) {
@@ -141,6 +149,7 @@ const create = async (req, res) => {
       activityName,
       description,
       fileIds: fileIds,
+      locale: locale,
     })
     await bugReport.save()
 
@@ -324,6 +333,7 @@ const webhook = async (req, res) => {
         replyText: text,
         originalDescription: bugReport.description,
         activityName: bugReport.activityName,
+        locale: bugReport.locale || 'es',
         conversation,
         attachments,
       })

@@ -51,5 +51,11 @@
   "tr": "Turkish",
   "sl": "Slovenian",
   "lv": "Latvian",
-  "is": "Icelandic"
+  "is": "Icelandic",
+  "A reply has been published to the bug report you sent for the activity": "Se ha publicado una respuesta al reporte de error que enviaste para la actividad",
+  "Reply:": "Respuesta:",
+  "Details of your original report:": "Detalle de tu reporte original:",
+  "Activity:": "Actividad:",
+  "Description:": "Descripción:",
+  "New reply to your bug report in": "Nueva respuesta a tu reporte de error en"
 }
