@@ -1,4 +1,5 @@
 const BugReport = require('../models/BugReport')
+const User = require('../models/User')
 const axios = require('axios')
 const logger = require('../utils/logger')
 const emails = require('../emails')
@@ -45,9 +46,33 @@ const create = async (req, res) => {
   logger.debug('EXEC create bugReportsController')
 
   const { app, activityName, description, screenshot, metadata } = req.body
-  const { email, name } = req.user
 
   try {
+    let email = null
+    let name = 'Usuario de ARASAAC'
+
+    if (req.user && req.user.id) {
+      try {
+        const dbUser = await User.findById(req.user.id)
+        if (dbUser) {
+          email = dbUser.email
+          name = dbUser.name
+        }
+      } catch (dbErr) {
+        logger.error(`Error loading user from DB: ${dbErr.message}`)
+      }
+    }
+
+    if (!email && metadata && metadata.user) {
+      email = metadata.user.email
+      name = metadata.user.name || name
+    }
+
+    if (!email) {
+      return res.status(400).json({ error: 'User email is required' })
+    }
+
+    // Resolve channelId
     let channelId = process.env.MATTERMOST_CHANNEL_ID
     if (app) {
       const appChannelVar = `MATTERMOST_CHANNEL_ID_${app.toUpperCase()}`
