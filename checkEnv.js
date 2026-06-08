@@ -1,7 +1,7 @@
 const logger = require('./utils/logger')
 
-const checkEnvs = envVars =>
-  envVars.forEach(envVar => {
+const checkEnvs = (envVars) =>
+  envVars.forEach((envVar) => {
     if (!process.env[envVar]) {
       logger.error(`Variable ${envVar} not defined`)
       process.exit(1)
@@ -19,7 +19,11 @@ checkEnvs([
   'CROWDIN_ARASAAC_API_KEY',
   'MONGO_DB_USER',
   'MONGO_DB_PWD',
-  'CRONTAB'
+  'CRONTAB',
+  'MATTERMOST_URL',
+  'MATTERMOST_CHANNEL_ID',
+  'MATTERMOST_TOKEN',
+  'MATTERMOST_WEBHOOK_TOKEN',
 ])
 
 module.exports = checkEnvs

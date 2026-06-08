@@ -12,7 +12,7 @@ const {
   EMAIL_SMTP,
   EMAIL_PORT,
   LOG_LEVEL,
-  NODE_ENV
+  NODE_ENV,
 } = process.env
 
 // const transport = nodemailer.createTransport({
@@ -35,32 +35,32 @@ const transport = nodemailer.createTransport({
   secure: true, // upgrade later with STARTTLS
   auth: {
     user: EMAIL_USER,
-    pass: EMAIL_PASSWORD
+    pass: EMAIL_PASSWORD,
   },
   // requireTLS: true,
   // debug: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
   // logger: `${LOG_LEVEL} === 'debug' || ${LOG_LEVEL} === 'silly' ? true : false`,
 })
 
-
-logger.debug (`Sendind email with user "${EMAIL_USER}" and password "${EMAIL_PASSWORD}" through "${EMAIL_SMTP}" and port ${EMAIL_PORT}`)
-
+logger.debug(
+  `Sendind email with user "${EMAIL_USER}" and password "${EMAIL_PASSWORD}" through "${EMAIL_SMTP}" and port ${EMAIL_PORT}`,
+)
 
 // remove val and an, it does not work, we will use ca
 const locales = languages.filter(
-  language => language !== 'val' && language !== 'an'
+  (language) => language !== 'val' && language !== 'an',
 )
 const newEmail = new Email({
   message: {
-    from: `${EMAIL_FROM} <${EMAIL_USER}>`
+    from: `${EMAIL_FROM} <${EMAIL_USER}>`,
   },
   // uncomment below to send emails in development/test env:
   send: true,
   transport,
   i18n: {
     locales,
-    directory: path.resolve(__dirname, 'locales')
-  }
+    directory: path.resolve(__dirname, 'locales'),
+  },
 })
 
 const contactEmail = (userEmail, userName) =>
@@ -68,48 +68,48 @@ const contactEmail = (userEmail, userName) =>
     message: {
       /* change EMAIL_TO for EMAIL_USER for aragon.es: */
       from: `${userName} <${EMAIL_USER}>`,
-      replyTo: userEmail
+      replyTo: userEmail,
     },
     // uncomment below to send emails in development/test env:
     send: true,
     transport,
     i18n: {
       locales,
-      directory: path.resolve(__dirname, 'locales')
-    }
+      directory: path.resolve(__dirname, 'locales'),
+    },
   })
 
-const sendContactMail = data =>
+const sendContactMail = (data) =>
   new Promise((resolve, reject) => {
     return contactEmail(data.email, data.name)
       .send({
         template: 'tplContact',
         message: {
-          to: 'arasaac@aragon.es'
+          to: 'arasaac@aragon.es',
         },
         locals: {
           name: data.name,
           subject: data.subject,
           email: data.email,
-          message: data.message
-        }
+          message: data.message,
+        },
         // htmlToText: true
       })
       .then(() => {
         logger.debug(`Sent contact email from user ${data.email}`)
         resolve()
       })
-      .catch(error => {
+      .catch((error) => {
         reject(
           new CustomError(
             `Error sending contact email from user ${data.email}: ${error}`,
-            500
-          )
+            500,
+          ),
         )
       })
   })
 
-const sendWelcomeMail = user =>
+const sendWelcomeMail = (user) =>
   new Promise((resolve, reject) => {
     var tokenUrl = ''
     if (NODE_ENV === 'development') {
@@ -123,27 +123,27 @@ const sendWelcomeMail = user =>
       .send({
         template: 'tplWelcome',
         message: {
-          to: user.email
+          to: user.email,
         },
         locals: {
           name: user.name,
           direction,
           // if locale does not exist... it uses en by default
           locale: user.locale,
-          tokenUrl
+          tokenUrl,
         },
-        htmlToText: true
+        htmlToText: true,
       })
       .then(() => {
         logger.debug(`Sent welcome email OK to ${user.email}`)
         resolve()
       })
-      .catch(error => {
+      .catch((error) => {
         reject(
           new CustomError(
             `Error sending welcome email to ${user.email}: ${error}`,
-            500
-          )
+            500,
+          ),
         )
       })
   })
@@ -161,7 +161,7 @@ const sendPasswordRecoveryMail = (user, password) =>
       .send({
         template: 'tplPasswordRecovery',
         message: {
-          to: user.email
+          to: user.email,
         },
         locals: {
           name: user.name,
@@ -169,29 +169,29 @@ const sendPasswordRecoveryMail = (user, password) =>
           // if locale does not exist... it uses en by default
           locale: user.locale,
           accessUrl,
-          password
+          password,
         },
-        htmlToText: true
+        htmlToText: true,
       })
       .then(() => {
         logger.debug(`Sent password recovery email OK to ${user.email}`)
         resolve()
       })
-      .catch(error => {
+      .catch((error) => {
         reject(
           new CustomError(
             `Error sending password recovery email OK to ${
               user.email
             }: ${error}`,
-            500
-          )
+            500,
+          ),
         )
       })
   })
 
 /* we  use contactEmail as it's a  message for us, and maybe we would like to reply to
 the author off the material */
-const sendNewMaterialEmail = data =>
+const sendNewMaterialEmail = (data) =>
   new Promise((resolve, reject) => {
     var materialUrl
     if (NODE_ENV === 'development') {
@@ -201,34 +201,34 @@ const sendNewMaterialEmail = data =>
       .send({
         template: 'tplNewMaterial',
         message: {
-          to: 'arasaac@aragon.es'
+          to: 'arasaac@aragon.es',
         },
         locals: {
           name: data.emailAuthors.name,
           locale: 'es',
-          materialUrl
-        }
+          materialUrl,
+        },
         // htmlToText: true
       })
       .then(() => {
         logger.debug(
-          `Sent new material email from user ${data.emailAuthors.email}`
+          `Sent new material email from user ${data.emailAuthors.email}`,
         )
         resolve()
       })
-      .catch(error => {
+      .catch((error) => {
         reject(
           new CustomError(
             `Error sending contact email from user ${
               data.emailAuthors.email
             }: ${error}`,
-            500
-          )
+            500,
+          ),
         )
       })
   })
 
-const sendTranslationEmail = data =>
+const sendTranslationEmail = (data) =>
   new Promise((resolve, reject) => {
     const { idMaterial, name, email, targetLanguage } = data
     var materialUrl
@@ -239,32 +239,32 @@ const sendTranslationEmail = data =>
       .send({
         template: 'tplTranslation',
         message: {
-          to: 'arasaac@aragon.es'
+          to: 'arasaac@aragon.es',
         },
         locals: {
           name,
           locale: 'es',
           materialUrl,
-          targetLanguage
-        }
+          targetLanguage,
+        },
         // htmlToText: true
       })
       .then(() => {
         logger.debug(`Sent new material email from user ${email}`)
         resolve()
       })
-      .catch(error => {
+      .catch((error) => {
         logger.error(`Error sending contact email from user ${email}: ${error}`)
         reject(
           new CustomError(
             `Error sending contact email from user ${email}: ${error}`,
-            500
-          )
+            500,
+          ),
         )
       })
   })
 
-const sendPublishedMaterialEmail = data =>
+const sendPublishedMaterialEmail = (data) =>
   new Promise((resolve, reject) => {
     const { idMaterial, name, email, locale } = data
     var materialUrl, userLocale
@@ -279,33 +279,84 @@ const sendPublishedMaterialEmail = data =>
       .send({
         template: 'tplPublishedMaterial',
         message: {
-          to: email
+          to: email,
         },
         locals: {
           name,
           locale: userLocale,
           direction,
-          materialUrl
-        }
+          materialUrl,
+        },
         // htmlToText: true
       })
       .then(() => {
         logger.debug(`Sent new material email from user ${email}`)
         resolve()
       })
-      .catch(error => {
+      .catch((error) => {
         logger.error(`Error sending contact email from user ${email}: ${error}`)
         reject(
           new CustomError(
             `Error sending contact email from user ${email}: ${error}`,
-            500
-          )
+            500,
+          ),
         )
       })
   })
 
-const getDirection = locale =>
+const getDirection = (locale) =>
   locale === 'ar' || locale === 'he' ? 'rtl' : 'ltr'
+
+const sendBugReportReplyMail = (data) =>
+  new Promise((resolve, reject) => {
+    const {
+      toEmail,
+      toName,
+      ccEmail,
+      replyText,
+      originalDescription,
+      activityName,
+    } = data
+
+    // Construct message options
+    const messageOptions = {
+      to: `${toName} <${toEmail}>`,
+    }
+
+    // If ccEmail is provided and is different from toEmail, add it to CC
+    if (ccEmail && ccEmail.toLowerCase() !== toEmail.toLowerCase()) {
+      messageOptions.cc = ccEmail
+    }
+
+    return newEmail
+      .send({
+        template: 'tplBugReportReply',
+        message: messageOptions,
+        locals: {
+          name: toName,
+          locale: 'es',
+          replyText,
+          originalDescription,
+          activityName,
+        },
+        htmlToText: true,
+      })
+      .then(() => {
+        logger.debug(`Sent bug report reply email OK to ${toEmail}`)
+        resolve()
+      })
+      .catch((error) => {
+        logger.error(
+          `Error sending bug report reply email to ${toEmail}: ${error}`,
+        )
+        reject(
+          new CustomError(
+            `Error sending bug report reply email to ${toEmail}: ${error}`,
+            500,
+          ),
+        )
+      })
+  })
 
 module.exports = {
   sendWelcomeMail,
@@ -313,5 +364,6 @@ module.exports = {
   sendContactMail,
   sendNewMaterialEmail,
   sendTranslationEmail,
-  sendPublishedMaterialEmail
+  sendPublishedMaterialEmail,
+  sendBugReportReplyMail,
 }

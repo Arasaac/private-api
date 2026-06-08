@@ -1,0 +1,17 @@
+doctype transitional
+html
+  head
+    meta(charset='utf-8')
+  body
+    h2 Hola #{name},
+    p Se ha publicado una respuesta al reporte de error que enviaste para la actividad <strong>#{activityName}</strong>.
+    
+    div(style="background-color: #f7f9fa; border-left: 4px solid #007bff; padding: 15px; margin: 20px 0;")
+      h4(style="margin-top: 0;") Respuesta:
+      p(style="white-space: pre-wrap; font-size: 16px;") #{replyText}
+    
+    div(style="color: #6c757d; font-size: 14px; margin-top: 30px; border-top: 1px solid #dee2e6; padding-top: 15px;")
+      h5 Detalle de tu reporte original:
+      p <strong>Actividad:</strong> #{activityName}
+      p <strong>Descripción:</strong>
+      p(style="white-space: pre-wrap;") #{originalDescription}

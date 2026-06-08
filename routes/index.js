@@ -10,6 +10,7 @@ const phrases = require('./phrases.js')
 const materials = require('./materials')
 // const sitemap = require('./sitemap')
 const pages = require('./pages.js')
+const bugReports = require('./bugReports')
 
 // const returnRouter = io => {
 //   const catalogs = require('./catalogs')(io)
@@ -46,6 +47,7 @@ router.use('/keywords', keywords)
 router.use('/materials', materials)
 // router.use('/sitemap', sitemap)
 router.use('/pages', pages)
+router.use('/bug-reports', bugReports)
 
 router.get('/', (req, res) => {
   res.status(200).json({ message: 'Connected to ARASAAC private API' })
