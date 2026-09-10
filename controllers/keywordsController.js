@@ -15,24 +15,31 @@ const getAll = async (req, res) => {
   logger.debug(`EXEC getAll keywordsController`)
 
   // we should obtain data just for languages with permissions for translator
-  const dataLanguages = req.user.role === 'admin' ? languages : req.user.targetLanguages
+  const dataLanguages =
+    req.user.role === 'admin' ? languages : req.user.targetLanguages
   try {
     const keywords = await Keywords.find({}).lean()
     if (!keywords) {
       logger.debug(`Not found keywords`)
       return res.status(404).json({})
     }
-    const keywordsResponse = dataLanguages.map(language => {
-      const tmpKeyword = keywords.filter(keyword => keyword.language === language)
-      return { language, updated: tmpKeyword[0].updated, keywords: tmpKeyword[0].words.length }
+    const keywordsResponse = dataLanguages.map((language) => {
+      const tmpKeyword = keywords.find(
+        (keyword) => keyword.language === language,
+      )
+      return {
+        language,
+        updated: tmpKeyword ? tmpKeyword.updated : null,
+        keywords: tmpKeyword && tmpKeyword.words ? tmpKeyword.words.length : 0,
+      }
     })
     return res.json(keywordsResponse)
   } catch (error) {
     logger.error(
-      `Error executing getAll in keywordsController. See error: ${error}`
+      `Error executing getAll in keywordsController. See error: ${error}`,
     )
     return res.status(500).json({
-      error: error.message
+      error: error.message,
     })
   }
 }
@@ -56,15 +63,15 @@ const updateKeywords = async (req, res) => {
     }
 
     const category = await Category.findOne({ locale: language }, { _id: 0 })
-    let catkeywords = [] 
+    let catkeywords = []
     if (!category) {
-      logger.warn(`No categories found for locale ${locale} we set it empty for keywords generation!`)
-    }
-    else {
+      logger.warn(
+        `No categories found for locale ${locale} we set it empty for keywords generation!`,
+      )
+    } else {
       const keywords = jp.query(category.data, '$..keywords')
       catKeywords = [].concat(...keywords)
     }
-
 
     // let merged = [].concat(...words)
     merged = [].concat(...words, ...catKeywords).sort()
@@ -74,7 +81,7 @@ const updateKeywords = async (req, res) => {
     // now we compare it to saved data, and update if necessary:
     const keywords = await Keywords.findOne(
       { language },
-      { words: 1, _id: 0 }
+      { words: 1, _id: 0 },
     ).lean()
     const oldKeywords = keywords ? keywords.words : []
     if (JSON.stringify(merged) !== JSON.stringify(oldKeywords)) {
@@ -82,15 +89,15 @@ const updateKeywords = async (req, res) => {
       const data = {
         language,
         words: merged,
-        updated: new Date()
+        updated: new Date(),
       }
       const updateKeywords = await Keywords.findOneAndUpdate(
         { language },
         { $set: data },
         {
           new: true,
-          upsert: true
-        }
+          upsert: true,
+        },
       )
       if (updateKeywords) {
         logger.debug(`DONE updated keywords for language  ${language}`)
@@ -105,19 +112,19 @@ const updateKeywords = async (req, res) => {
       }
     }
     return res.status(200).json({
-      msg: `DONE but not need to update keywords for language  ${language}`
+      msg: `DONE but not need to update keywords for language  ${language}`,
     })
   } catch (err) {
     logger.error(
-      `FAILED updating keywords for language  ${language}: ${err.message}`
+      `FAILED updating keywords for language  ${language}: ${err.message}`,
     )
     return res.status(500).json({
-      msg: `FAILED updating keywords for language  ${language}: ${err.msg}`
+      msg: `FAILED updating keywords for language  ${language}: ${err.msg}`,
     })
   }
 }
 
-const updateKeywordsByCrontab = async language => {
+const updateKeywordsByCrontab = async (language) => {
   logger.debug(`EXEC updateKeywords for language  ${language}`)
   try {
     const pictograms = await Pictograms[language]
@@ -135,16 +142,15 @@ const updateKeywordsByCrontab = async language => {
     }
 
     const category = await Category.findOne({ locale: language }, { _id: 0 })
-    let catkeywords = [] 
+    let catkeywords = []
     if (!category) {
-      logger.warn(`No categories found for locale ${locale} we set it empty for keywords generation!`)
-    }
-    else {
+      logger.warn(
+        `No categories found for locale ${locale} we set it empty for keywords generation!`,
+      )
+    } else {
       const keywords = jp.query(category.data, '$..keywords')
       catKeywords = [].concat(...keywords)
     }
-
-
 
     // let merged = [].concat(...words)
     let merged = [].concat(...words, ...catKeywords).sort()
@@ -154,7 +160,7 @@ const updateKeywordsByCrontab = async language => {
     // now we compare it to saved data, and update if necessary:
     const keywords = await Keywords.findOne(
       { language },
-      { words: 1, _id: 0 }
+      { words: 1, _id: 0 },
     ).lean()
     const oldKeywords = keywords ? keywords.words : []
     if (JSON.stringify(merged) !== JSON.stringify(oldKeywords)) {
@@ -162,15 +168,15 @@ const updateKeywordsByCrontab = async language => {
       const data = {
         language,
         words: merged,
-        updated: new Date()
+        updated: new Date(),
       }
       const updateKeywords = await Keywords.findOneAndUpdate(
         { language },
         { $set: data },
         {
           new: true,
-          upsert: true
-        }
+          upsert: true,
+        },
       )
       if (updateKeywords) {
         logger.debug(`DONE updated keywords for language  ${language}`)
@@ -181,12 +187,12 @@ const updateKeywordsByCrontab = async language => {
       }
     }
     logger.debug(
-      `DONE but not need to update keywords for language  ${language}`
+      `DONE but not need to update keywords for language  ${language}`,
     )
     return true
   } catch (err) {
     logger.error(
-      `FAILED updating keywords for language  ${language}: ${err.message}`
+      `FAILED updating keywords for language  ${language}: ${err.message}`,
     )
     return false
   }
@@ -195,5 +201,5 @@ const updateKeywordsByCrontab = async language => {
 module.exports = {
   getAll,
   updateKeywords,
-  updateKeywordsByCrontab
+  updateKeywordsByCrontab,
 }

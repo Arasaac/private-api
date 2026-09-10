@@ -57,9 +57,11 @@ app.use(bodyParser.json({ limit: '50mb', type: 'application/json' }))
 app.use('/api', router)
 
 // not express but http server so socket-io can work
-server.listen(port, () => {
-  console.log(`App running on port ${port}`)
-})
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(port, () => {
+    console.log(`App running on port ${port}`)
+  })
+}
 
 app.set('locutionsFiles', loadLocutionsFiles())
 module.exports = app // for testing

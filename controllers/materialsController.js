@@ -6,7 +6,11 @@ const recursive = require('recursive-readdir')
 const Promise = require('bluebird')
 const path = require('path')
 const formidable = require('formidable')
-const { sendNewMaterialEmail, sendTranslationEmail, sendPublishedMaterialEmail } = require('../emails')
+const {
+  sendNewMaterialEmail,
+  sendTranslationEmail,
+  sendPublishedMaterialEmail,
+} = require('../emails')
 const logger = require('../utils/logger')
 const { saveFilesByType } = require('./utils')
 const { MATERIAL_DIR } = require('../utils/constants')
@@ -22,7 +26,7 @@ const create = (req, res) => {
     encoding: 'utf-8',
     keepExtensions: true,
     multiples: true,
-    maxFileSize: 600 * 1024 * 1024 // 600MB instead of 200MB (default value)
+    maxFileSize: 600 * 1024 * 1024, // 600MB instead of 200MB (default value)
   })
 
   form.on('error', (err) => {
@@ -34,19 +38,17 @@ const create = (req, res) => {
     const formData = JSON.parse(fields.formData)
     logger.debug(`Material formData: ${JSON.stringify(formData)}`)
     if (!formData.translations) {
-      logger.debug(`Invalid material, need at least title and desc in one language`)
+      logger.debug(
+        `Invalid material, need at least title and desc in one language`,
+      )
       return res.status(422).json({
-        error: 'It neeeds at least title and desc in one language'
+        error: 'It neeeds at least title and desc in one language',
       })
     }
 
     /* get id for material, get last one */
     const dirs = await fs.readdir(MATERIAL_DIR)
-    const materialDirs = dirs
-      .filter(
-        dirName =>
-          !isNaN(dirName)
-      )
+    const materialDirs = dirs.filter((dirName) => !isNaN(dirName))
     const idMaterial = materialDirs.length ? Math.max(...materialDirs) + 1 : 1
 
     /* prepare data to be saved in MongoDB  */
@@ -59,14 +61,18 @@ const create = (req, res) => {
       const saveMaterialFiles = saveFilesByType(files, material.idMaterial)
       // create a dir per language if not exists, just for languages without specific languagefiles */
       const promisesLanguageDir = material.translations
-        .map(translation => translation.lang)
-        .map(language => fs.ensureDir(path.resolve(MATERIAL_DIR, idMaterial.toString(), language)))
+        .map((translation) => translation.lang)
+        .map((language) =>
+          fs.ensureDir(
+            path.resolve(MATERIAL_DIR, idMaterial.toString(), language),
+          ),
+        )
       await Promise.all([saveMaterialFiles, promisesLanguageDir])
     } catch (err) {
       logger.error(`Error creating material: ${err}`)
       return res.status(500).json({
         message: 'Error saving material',
-        error: err
+        error: err,
       })
     }
 
@@ -79,7 +85,7 @@ const create = (req, res) => {
     }
 
     return res.status(201).json({
-      id: material.idMaterial
+      id: material.idMaterial,
     })
   })
 }
@@ -92,7 +98,7 @@ const addTranslation = (req, res) => {
     encoding: 'utf-8',
     keepExtensions: true,
     multiples: true,
-    maxFileSize: 600 * 1024 * 1024 // 600MB instead of 200MB (default value)
+    maxFileSize: 600 * 1024 * 1024, // 600MB instead of 200MB (default value)
   })
 
   form.on('error', (err) => {
@@ -105,27 +111,26 @@ const addTranslation = (req, res) => {
     if (!formData.translations) {
       logger.debug(`Invalid material, need at least one translation`)
       return res.status(422).json({
-        error: 'It neeeds at least one translation'
+        error: 'It neeeds at least one translation',
       })
     }
 
     try {
       const material = await Materials.findOne({ idMaterial }).lean()
       if (!material) {
-        throw new CustomError(
-          `Material with id ${idMaterial} not found`,
-          500
-        )
+        throw new CustomError(`Material with id ${idMaterial} not found`, 500)
       }
 
       /* chek that the language does not exists */
       /* first language is the one that matters */
       const targetLanguage = formData.translations[0]
-      const existsLanguage = material.translations.some(translation => translation.language === targetLanguage)
+      const existsLanguage = material.translations.some(
+        (translation) => translation.language === targetLanguage,
+      )
       if (existsLanguage) {
         throw new CustomError(
           `Translation provided already exists in the material and could cause conflicts`,
-          403
+          403,
         )
       }
       material.translations.push(targetLanguage)
@@ -138,18 +143,18 @@ const addTranslation = (req, res) => {
         name: formData.name,
         email: formData.email,
         targetLanguage: targetLanguage.lang,
-        idMaterial
+        idMaterial,
       }
 
       sendTranslationEmail(emailData)
       return res.status(201).json({
-        id: idMaterial
+        id: idMaterial,
       })
     } catch (err) {
       logger.error(`Error adding translation to material: ${err.message}`)
       return res.status(err.httpCode || 500).json({
         message: `Error adding translation to material ${idMaterial}`,
-        error: err.message
+        error: err.message,
       })
     }
   })
@@ -159,11 +164,12 @@ const update = async (req, res) => {
   const { id } = req.params
   /* not const, we  can loose translation or authors value inside try as
   it is another scope */
-  const { translations, areas, activities, status, authors, lastUpdated } = req.body
+  const { translations, areas, activities, status, authors, lastUpdated } =
+    req.body
   const now = Date.now()
 
   logger.debug(
-    `EXEC update for material with id ${id} and data ${JSON.stringify(req.body)}`
+    `EXEC update for material with id ${id} and data ${JSON.stringify(req.body)}`,
   )
 
   let response, material, isPublished
@@ -178,16 +184,18 @@ const update = async (req, res) => {
     /* we update depending on role s */
     if (req.user.role !== 'admin') {
       // we just add translations if not exists:
-      const languages = translations.map(translation => translation.lang)
-      const targetLanguages = material.translations.map(translation => translation.lang)
-      const found = languages.some(r => targetLanguages.indexOf(r) >= 0)
+      const languages = translations.map((translation) => translation.lang)
+      const targetLanguages = material.translations.map(
+        (translation) => translation.lang,
+      )
+      const found = languages.some((r) => targetLanguages.indexOf(r) >= 0)
       if (found) {
         throw new CustomError(
           `A translation provided already exists in the materials and could cause conflicts`,
-          403
+          403,
         )
       } else {
-        const addTranslations = translations.map(translation => {
+        const addTranslations = translations.map((translation) => {
           translation.lastUpdated = now
           return translation
         })
@@ -225,10 +233,19 @@ const update = async (req, res) => {
     }
     material.lastUpdated = lastUpdated || now
     /* fill with files */
-    const modifyMaterial = await Materials
-      .findOneAndUpdate({ idMaterial: id }, material, { new: true })
-      .populate('authors.author', 'name email company url facebook google pictureProvider')
-      .populate('translations.authors.author', 'name email company url facebook google pictureProvider')
+    const modifyMaterial = await Materials.findOneAndUpdate(
+      { idMaterial: id },
+      material,
+      { new: true },
+    )
+      .populate(
+        'authors.author',
+        'name email company url facebook google pictureProvider',
+      )
+      .populate(
+        'translations.authors.author',
+        'name email company url facebook google pictureProvider',
+      )
       .lean()
 
     response = await getFiles(modifyMaterial)
@@ -236,7 +253,7 @@ const update = async (req, res) => {
     logger.error(`ERROR executing update material with id ${id}`)
     return res.status(err.httpCode || 500).json({
       message: 'Error updating material. See error field for detail',
-      error: err.message
+      error: err.message,
     })
   }
 
@@ -246,20 +263,35 @@ const update = async (req, res) => {
     try {
       /* get all the authors id's */
       /* now we send the emails */
-      const mainAuthors = material.authors.map(item => item.author)
-      const tmpOtherAuthors = material.translations.map(translation =>
-        translation.authors.map(item => item.author))
+      const mainAuthors = material.authors.map((item) => item.author)
+      const tmpOtherAuthors = material.translations.map((translation) =>
+        translation.authors.map((item) => item.author),
+      )
       const otherAuthors = [].concat.apply([], tmpOtherAuthors)
       const allAuthors = [...mainAuthors, ...otherAuthors]
-      const uniqueAuthors = allAuthors.filter((item, pos) => allAuthors.indexOf(item) == pos)
+      const uniqueAuthors = allAuthors.filter(
+        (item, pos) => allAuthors.indexOf(item) == pos,
+      )
 
-      const users = await Users.find({ _id: { $in: uniqueAuthors.map(author => ObjectID(author)) } }, { name: 1, email: 1, locale: 1 }).lean()
+      const users = await Users.find(
+        { _id: { $in: uniqueAuthors.map((author) => ObjectID(author)) } },
+        { name: 1, email: 1, locale: 1 },
+      ).lean()
       if (!users.length) {
-        logger.error(`Not sending email after publishing material: no users found for material with id ${material.idMaterial}!`)
+        logger.error(
+          `Not sending email after publishing material: no users found for material with id ${material.idMaterial}!`,
+        )
       }
-      users.forEach(user => {
-        logger.info(`Sending notification email to user ${user.email} in language ${user.locale}`)
-        sendPublishedMaterialEmail({ locale: user.locale, email: user.email, name: user.name, idMaterial: id })
+      users.forEach((user) => {
+        logger.info(
+          `Sending notification email to user ${user.email} in language ${user.locale}`,
+        )
+        sendPublishedMaterialEmail({
+          locale: user.locale,
+          email: user.email,
+          name: user.name,
+          idMaterial: id,
+        })
       })
     } catch (err) {
       logger.error(`ERROR sending material publication email: ${err} `)
@@ -274,34 +306,53 @@ const getMaterialById = (req, res) => {
   logger.debug(`EXEC getMaterialById with id ${id}`)
   // Use lean to get a plain JS object to modify it, instead of a full model instance
   // Materials.findOne({idMaterial: id}, function(err, material){
-  Materials
-    .findOne({ idMaterial: id })
-    .populate('authors.author', 'name email company url facebook google pictureProvider')
-    .populate('translations.authors.author', 'name email company url facebook google pictureProvider')
-    .lean().exec(async (err, material) => {
+  Materials.findOne({ idMaterial: id })
+    .populate(
+      'authors.author',
+      'name email company url facebook google pictureProvider',
+    )
+    .populate(
+      'translations.authors.author',
+      'name email company url facebook google pictureProvider',
+    )
+    .lean()
+    .exec(async (err, material) => {
       if (err) {
         logger.error(`getMaterialById with id ${id}: ${err} `)
         return res.status(500).json({
           message: `Error get MaterialById with id ${id}`,
-          error: err
+          error: err,
         })
       }
       if (!material) {
         return res.status(404).json({
           message: 'Material not found',
-          err
+          err,
         })
       }
       /* check by user */
       if (material.status !== PUBLISHED) {
-        if (!req.user) return res.status(403).json({ message: 'Material not published, access forbidden', err })
+        if (!req.user)
+          return res
+            .status(403)
+            .json({ message: 'Material not published, access forbidden', err })
         else if (req.user.role !== 'admin') {
           /* if no author, it's not showned */
-          let languageAuthors = material.translations.map(translation => translation.authors)
+          let languageAuthors = material.translations.map(
+            (translation) => translation.authors,
+          )
           languageAuthors = _.flatten(languageAuthors)
           const authors = [...languageAuthors, ...material.authors]
-          const authorExists = authors.some(author => author.author._id.toString() === req.user.id)
-          if (!authorExists) return res.status(403).json({ message: 'Material not published, access forbidden', err })
+          const authorExists = authors.some(
+            (author) => author.author._id.toString() === req.user.id,
+          )
+          if (!authorExists)
+            return res
+              .status(403)
+              .json({
+                message: 'Material not published, access forbidden',
+                err,
+              })
         }
       }
       const response = await getFiles(material)
@@ -313,8 +364,9 @@ const remove = async (req, res) => {
   const { id } = req.params
   logger.debug(`EXEC remove material with id ${id}`)
   try {
-    const material = await Materials.deleteOne({ 'idMaterial': id })
-    if (!material.n) throw new CustomError(`Remove material with id: ${id} not found`, 404)
+    const material = await Materials.deleteOne({ idMaterial: id })
+    if (!material.n)
+      throw new CustomError(`Remove material with id: ${id} not found`, 404)
     /* now we remove from file system */
     await fs.remove(`${MATERIAL_DIR}/${id}`)
     return res.json({ idMaterial: id })
@@ -322,7 +374,7 @@ const remove = async (req, res) => {
     logger.error(`Error remove material with id ${id}: ${err.message}`)
     return res.status(err.httpCode || 500).json({
       message: `Error remove material with id ${id}`,
-      error: err.message
+      error: err.message,
     })
   }
 }
@@ -342,22 +394,26 @@ const addFavoriteList = async (req, res) => {
     user.markModified('favorites')
     user.updated = now
     await user.save()
-    logger.debug(`DONE addFavoriteList for user ${id} and listName ${listName} `)
+    logger.debug(
+      `DONE addFavoriteList for user ${id} and listName ${listName} `,
+    )
     return res.status(204).json()
   } catch (err) {
     logger.error(
-      `ERROR addFavoriteList for user ${id} and listName ${listName}: ${err} `
+      `ERROR addFavoriteList for user ${id} and listName ${listName}: ${err} `,
     )
     return res.status(err.httpCode || 500).json({
       message: 'Error updating favorites.   See error field for detail',
-      error: err
+      error: err,
     })
   }
 }
 
 const searchMaterials = async (req, res) => {
   const { locale, searchText, searchType } = req.params
-  logger.debug(`EXEC searchMaterials with locale ${locale} and searchText ${searchText}`)
+  logger.debug(
+    `EXEC searchMaterials with locale ${locale} and searchText ${searchText}`,
+  )
   // depending on language we can use $text index or we should set $language to none, so no stopwords
   let customLanguage
   switch (locale) {
@@ -396,7 +452,9 @@ const searchMaterials = async (req, res) => {
       logger.debug(`Exec find with activity ${searchText}`)
     } else {
       query = { activities: searchText, status: PUBLISHED }
-      logger.debug(`Exec find with activity ${searchText}and status ${PUBLISHED}`)
+      logger.debug(
+        `Exec find with activity ${searchText}and status ${PUBLISHED}`,
+      )
     }
   } else if (searchType === 'area') {
     if (req.user && req.user.role === 'admin') {
@@ -408,58 +466,103 @@ const searchMaterials = async (req, res) => {
     }
   } else if (searchType === 'language') {
     if (req.user && req.user.role === 'admin') {
-      query = { }
+      query = {}
       logger.debug(`Exec find with language ${searchText}`)
     } else {
       query = { status: PUBLISHED }
-      logger.debug(`Exec find with language ${searchText} and status ${PUBLISHED}`)
+      logger.debug(
+        `Exec find with language ${searchText} and status ${PUBLISHED}`,
+      )
     }
   } else if (searchType === 'author') {
     try {
       const users = await Users.find({ name: searchText }).lean()
       if (!users.length) {
-        logger.debug(
-          `Not found user with name ${searchText} `
-        )
+        logger.debug(`Not found user with name ${searchText} `)
         return res.status(404).json([])
       }
       if (req.user && req.user.role === 'admin') {
-        query = { $or: [{ 'authors.author': { $in: users.map(user => ObjectID(user._id)) } }, { 'translations.authors.author': { $in: users.map(user => ObjectID(user._id)) } }] }
-        logger.debug(`Exec find with searchText ${searchText} and language ${customLanguage} `)
+        query = {
+          $or: [
+            {
+              'authors.author': {
+                $in: users.map((user) => ObjectID(user._id)),
+              },
+            },
+            {
+              'translations.authors.author': {
+                $in: users.map((user) => ObjectID(user._id)),
+              },
+            },
+          ],
+        }
+        logger.debug(
+          `Exec find with searchText ${searchText} and language ${customLanguage} `,
+        )
       } else {
-        query = { $or: [{ 'authors.author': { $in: users.map(user => ObjectID(user._id)) } }, { 'translations.authors.author': { $in: users.map(user => ObjectID(user._id)) } }], status: PUBLISHED }
-        logger.debug(`Exec find with searchText ${searchText}, language ${customLanguage} and status ${PUBLISHED} `)
+        query = {
+          $or: [
+            {
+              'authors.author': {
+                $in: users.map((user) => ObjectID(user._id)),
+              },
+            },
+            {
+              'translations.authors.author': {
+                $in: users.map((user) => ObjectID(user._id)),
+              },
+            },
+          ],
+          status: PUBLISHED,
+        }
+        logger.debug(
+          `Exec find with searchText ${searchText}, language ${customLanguage} and status ${PUBLISHED} `,
+        )
       }
     } catch (err) {
       logger.error(
-        `ERROR Getting materials for searchType ${searchType} and searchText ${searchText}: ${err} `
+        `ERROR Getting materials for searchType ${searchType} and searchText ${searchText}: ${err} `,
       )
       return res.status(err.httpCode || 500).json({
         message: 'Error getting materials. See error field for detail',
-        error: err
+        error: err,
       })
     }
   } else {
     if (req.user && req.user.role === 'admin') {
       query = { $text: { $search: searchText, $language: customLanguage } }
-      logger.debug(`Exec find with searchText ${searchText} and language ${customLanguage} `)
+      logger.debug(
+        `Exec find with searchText ${searchText} and language ${customLanguage} `,
+      )
     } else {
-      query = { $text: { $search: searchText, $language: customLanguage }, status: PUBLISHED }
-      logger.debug(`Exec find with searchText ${searchText}, language ${customLanguage} and status ${PUBLISHED} `)
+      query = {
+        $text: { $search: searchText, $language: customLanguage },
+        status: PUBLISHED,
+      }
+      logger.debug(
+        `Exec find with searchText ${searchText}, language ${customLanguage} and status ${PUBLISHED} `,
+      )
     }
   }
 
-  Materials
-    .find(query, { score: { $meta: 'textScore' } })
-    .sort({ 'score': { '$meta': 'textScore' } })
+  const isTextSearch = !!query.$text
+  const projection = isTextSearch ? { score: { $meta: 'textScore' } } : {}
+  const sort = isTextSearch
+    ? { score: { $meta: 'textScore' } }
+    : { lastUpdated: -1 }
+
+  Materials.find(query, projection)
+    .sort(sort)
     .populate('authors.author', 'name email company url facebook google')
     .lean()
     .exec(async (err, materials) => {
       if (err) {
-        logger.error(`searchMaterials with locale ${locale} and searchText ${searchText}: ${err} `)
+        logger.error(
+          `searchMaterials with locale ${locale} and searchText ${searchText}: ${err} `,
+        )
         return res.status(500).json({
           message: 'Error buscando el material',
-          error: err
+          error: err,
         })
       }
       // if no items, return empty array
@@ -467,9 +570,15 @@ const searchMaterials = async (req, res) => {
       /* in case of language,  we need to filter by language afterwards */
       let filterMaterials = materials
       if (searchType === 'language') {
-        filterMaterials = materials.filter(material => material.translations.some(translation => translation.lang === searchText))
+        filterMaterials = materials.filter((material) =>
+          material.translations.some(
+            (translation) => translation.lang === searchText,
+          ),
+        )
       }
-      const response = await Promise.all(filterMaterials.map(async material => getFiles(material))) // not async&await as we want to get all material images in parallel
+      const response = await Promise.all(
+        filterMaterials.map(async (material) => getFiles(material)),
+      ) // not async&await as we want to get all material images in parallel
       logger.debug(`DONE: Materials sended `)
       return res.json(response)
     })
@@ -482,8 +591,7 @@ const getLastMaterials = (req, res) => {
   // if (req.user) {
   //   query = {}
   // }
-  Materials
-    .find(query)
+  Materials.find(query)
     .sort({ lastUpdated: -1 })
     .limit(numItems)
     .populate('authors.author', 'name email company url facebook google')
@@ -492,7 +600,7 @@ const getLastMaterials = (req, res) => {
       if (err) {
         return res.status(500).json({
           message: 'Error buscando el material',
-          error: err
+          error: err,
         })
       }
 
@@ -501,14 +609,22 @@ const getLastMaterials = (req, res) => {
       // we filter unpublished:
       let filterMaterials = materials
       if (req.user && req.user.role !== 'admin') {
-        filterMaterials = materials.filter(material => material.status === PUBLISHED || material.authors.some(author => author.author._id.toString() === req.user.id))
+        filterMaterials = materials.filter(
+          (material) =>
+            material.status === PUBLISHED ||
+            material.authors.some(
+              (author) => author.author._id.toString() === req.user.id,
+            ),
+        )
         // we should filter translations not validated though we will validate all by default
         // filterMaterials = filterMaterials.filter(material => {
         //   material.translations = material.translations.filter(translation => translation.validated === true)
         //   return material.translations.length !== 0
         // })
       }
-      const response = await Promise.all(filterMaterials.map(material => getFiles(material)))
+      const response = await Promise.all(
+        filterMaterials.map((material) => getFiles(material)),
+      )
       return res.json(response)
     })
 }
@@ -518,26 +634,27 @@ const getUnpublished = async (req, res) => {
   let query = { status: { $ne: PUBLISHED } }
 
   try {
-    const materials = await Materials
-      .find(query)
+    const materials = await Materials.find(query)
       .sort({ lastUpdated: -1 })
       .populate('authors.author', 'name email company url facebook google')
       .lean()
     // if no items, return empty array
     if (materials.length === 0) return res.status(200).json([]) // send http code 404!!!
     // we also get files:
-    const response = await Promise.all(materials.map(material => getFiles(material)))
+    const response = await Promise.all(
+      materials.map((material) => getFiles(material)),
+    )
     return res.json(response)
   } catch (err) {
     logger.error(`Error getUnpublished: ${err.message}`)
     return res.status(err.httpCode || 500).json({
       message: `Error getting materials with status neq PUBLISHED`,
-      error: err.message
+      error: err.message,
     })
   }
 }
 
-const initMaterial = material => {
+const initMaterial = (material) => {
   material.commonFiles = []
   material.screenshots = {}
   material.commonScreenshots = []
@@ -545,17 +662,19 @@ const initMaterial = material => {
   material.file = {}
 }
 
-const getFiles = material => {
+const getFiles = (material) => {
   initMaterial(material)
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const materialLocales = []
     let baseDir = path.resolve(MATERIAL_DIR, material.idMaterial.toString())
-    material.translations.map(translation => materialLocales.push(translation.lang))
+    material.translations.map((translation) =>
+      materialLocales.push(translation.lang),
+    )
     recursive(baseDir, (err, files) => {
       // if err return material, if err is different from no screenshots dir, warning through console
       if (err) err.code !== 'ENOENT' && console.warn(err)
       if (files) {
-        files.map(file => {
+        files.map((file) => {
           let relativeFile = file.replace(baseDir, '')
           let fileName = path.basename(file)
           if (fileName === 'index.html') return // extra files from previous app
@@ -563,20 +682,24 @@ const getFiles = material => {
           let subdir = path.dirname(relativeFile).split(path.sep).pop()
           if (dir === '.' || dir === '/') {
             // if file is tar.gz, put it inside file json  {es: xxx-es.tgz, fr: xxx.fr.tgz...}
-            let filePattern = new RegExp('^index-[A-z]{2,3}-[0-9A-F]{8}-[0-9A-F]{4}-[4][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}.tgz$', 'i')
+            let filePattern = new RegExp(
+              '^index-[A-z]{2,3}-[0-9A-F]{8}-[0-9A-F]{4}-[4][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}.tgz$',
+              'i',
+            )
             if (filePattern.test(fileName)) {
               let fileLocale = fileName.split('-')[1]
               material.file[fileLocale] = fileName
             } else material.commonFiles.push(fileName)
-          } else if (dir.match(/screenshots_300$/)) material.commonScreenshots.push(fileName)
+          } else if (dir.match(/screenshots_300$/))
+            material.commonScreenshots.push(fileName)
           else if (dir.match(/screenshots_300\/[A-z]{2,3}$/)) {
             material.screenshots[subdir]
               ? material.screenshots[subdir].push(fileName)
-              : material.screenshots[subdir] = [fileName]
+              : (material.screenshots[subdir] = [fileName])
           } else if (dir.match(/^\/[A-z]{2,3}$/)) {
             material.files[subdir]
               ? material.files[subdir].push(fileName)
-              : material.files[subdir] = [fileName]
+              : (material.files[subdir] = [fileName])
           }
         })
       }
@@ -593,5 +716,5 @@ module.exports = {
   getLastMaterials,
   searchMaterials,
   getMaterialById,
-  getUnpublished
+  getUnpublished,
 }

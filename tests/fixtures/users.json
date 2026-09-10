@@ -1,0 +1,28 @@
+[
+  {
+    "_id": "60d5ec49f1b2c82d88c88888",
+    "name": "Admin User",
+    "email": "admin@arasaac.org",
+    "role": "admin",
+    "active": true,
+    "locale": "es",
+    "targetLanguages": ["es", "en"]
+  },
+  {
+    "_id": "60d5ec49f1b2c82d88c88889",
+    "name": "Translator User",
+    "email": "translator@arasaac.org",
+    "role": "translator",
+    "active": true,
+    "locale": "es",
+    "targetLanguages": ["es", "en"]
+  },
+  {
+    "_id": "60d5ec49f1b2c82d88c8888a",
+    "name": "Normal User",
+    "email": "user@arasaac.org",
+    "role": "user",
+    "active": true,
+    "locale": "es"
+  }
+]
