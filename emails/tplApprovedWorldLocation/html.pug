@@ -1,0 +1,14 @@
+doctype transitional
+html
+  head
+    meta(charset='utf-8')
+    style
+      include style.css
+  body
+    p= `Hola ${name},`
+    p= `¡Buenas noticias! Tu iniciativa "${locationName}" ha sido aprobada y ya está visible en el mapa de ARASAAC en el Mundo.`
+    br
+    a(href=worldUrl)
+      .button= `Ver en el mapa de ARASAAC`
+    br
+    p Muchas gracias por compartir tu experiencia con toda la comunidad.

@@ -141,8 +141,13 @@ router.post('/password/', (req, res) => {
   usersController.resetPassword(req, res)
 })
 
-// router.delete('/:id', (req, res) => {
-//   usersController.delete(req, res)
-// })
+router.delete(
+  '/:id',
+  passport.authenticate('bearer', { session: false }),
+  ownThisData(),
+  (req, res) => {
+    usersController.remove(req, res)
+  },
+)
 
 module.exports = router

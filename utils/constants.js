@@ -1,14 +1,18 @@
 const path = require('path')
+const fs = require('fs-extra')
 const IMAGE_DIR = '/pictograms'
 const MATERIAL_DIR = '/materials'
+const MAP_DIR = fs.existsSync('/map')
+  ? '/map'
+  : path.resolve(__dirname, '../../arasaac-data/map')
 const CONJUGATIONS_DIR = '/conjugations'
-const PUBLISHED =  1
+const PUBLISHED = 1
 const LOCUTIONS_DIR = '/locutions'
 const SVG_DIR = '/svg'
-const  TMP_DIR = '/tmp'
+const TMP_DIR = '/tmp'
 // catalogs must "depend" on IMAGE_DIR to prevent error with hard links: EXDEV: cross-device link not permitted
 const CATALOG_DIR = path.resolve(IMAGE_DIR, 'catalogs')
-const tmpCatalogDirRoot = locale => path.resolve(CATALOG_DIR, 'tmp', locale)
+const tmpCatalogDirRoot = (locale) => path.resolve(CATALOG_DIR, 'tmp', locale)
 const tmpCatalogDir = (locale, bn) =>
   bn
     ? path.resolve(CATALOG_DIR, 'tmp', locale, 'NO_COLOR')
@@ -18,24 +22,24 @@ const tmpCatalogDir = (locale, bn) =>
 const catalogProgress = [
   {
     init: 0,
-    duration: 5
+    duration: 5,
   },
   {
     init: 5,
-    duration: 15
+    duration: 15,
   },
   {
     init: 20,
-    duration: 60
+    duration: 60,
   },
   {
     init: 80,
-    duration: 18
+    duration: 18,
   },
   {
     init: 99,
-    duration: 1
-  }
+    duration: 1,
+  },
 ]
 
 const skin = {
@@ -43,7 +47,7 @@ const skin = {
   black: '#A65C17',
   assian: '#F4ECAD',
   mulatto: '#E3AB72',
-  aztec: '#CF9D7C'
+  aztec: '#CF9D7C',
 }
 
 const schematic = '#FEFEFE'
@@ -55,7 +59,7 @@ const hair = {
   black: '#020100',
   gray: '#EFEFEF',
   darkGray: '#AAABAB',
-  darkBrown: '#6A2703'
+  darkBrown: '#6A2703',
 }
 
 /* websocket msg */
@@ -67,6 +71,7 @@ module.exports = {
   IMAGE_DIR,
   CATALOG_DIR,
   MATERIAL_DIR,
+  MAP_DIR,
   CONJUGATIONS_DIR,
   LOCUTIONS_DIR,
   PUBLISHED,
@@ -80,5 +85,5 @@ module.exports = {
   WS_CATALOG_STATUS,
   catalogProgress,
   ARASAAC_URL,
-  DEV_ARASAAC_URL
+  DEV_ARASAAC_URL,
 }

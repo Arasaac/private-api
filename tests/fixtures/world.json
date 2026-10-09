@@ -1,0 +1,98 @@
+[
+  {
+    "id": 1,
+    "name": "C.F.I. Gabriel Pérez Cárcel",
+    "tipo": "Colegio",
+    "description": "Grupo de Trabajo sobre el Dolor en las personas con TEA",
+    "latitude": 37.9745102,
+    "longitude": -1.1207346,
+    "location": {
+      "type": "Point",
+      "coordinates": [-1.1207346, 37.9745102]
+    },
+    "address": {
+      "address": "Calle Pintor Saura Pacheco, 10",
+      "postalCode": "30011",
+      "city": "Murcia",
+      "province": "Murcia",
+      "country": "España"
+    },
+    "links": {
+      "mainWeb": "http://www.gabrielperezcarcel.es/",
+      "proyectWeb": "",
+      "urlNews": ""
+    },
+    "awards": "",
+    "urlAward": "",
+    "picture": "https://static.arasaac.org/map/1/grupo_dolor_tea_murcia_1.jpg",
+    "pictures": [
+      "https://static.arasaac.org/map/1/grupo_dolor_tea_murcia_1.jpg",
+      "https://static.arasaac.org/map/1/grupo_dolor_tea_murcia_2.jpg"
+    ],
+    "video": "",
+    "email": "",
+    "status": 1
+  },
+  {
+    "id": 2,
+    "name": "CEE Las Boqueras",
+    "tipo": "Colegio",
+    "description": "Iniciativa de accesibilidad cognitiva",
+    "latitude": 38.0021312,
+    "longitude": -1.1200423,
+    "location": {
+      "type": "Point",
+      "coordinates": [-1.1200423, 38.0021312]
+    },
+    "address": {
+      "address": "Camino Viejo de Monteagudo, 22",
+      "postalCode": "30007",
+      "city": "Murcia",
+      "province": "Murcia",
+      "country": "España"
+    },
+    "links": {
+      "mainWeb": "https://www.murciaeduca.es/ceeparaninosautistas/sitio/",
+      "proyectWeb": "",
+      "urlNews": ""
+    },
+    "awards": "",
+    "urlAward": "",
+    "picture": "https://static.arasaac.org/map/2/grupo_dolor_tea_murcia_1.jpg",
+    "pictures": [],
+    "video": "",
+    "email": "",
+    "status": 1
+  },
+  {
+    "id": 3,
+    "name": "Propuesta Pendiente de Revisión",
+    "tipo": "Hospital",
+    "description": "Señalización pendiente de validación",
+    "latitude": 40.416775,
+    "longitude": -3.70379,
+    "location": {
+      "type": "Point",
+      "coordinates": [-3.70379, 40.416775]
+    },
+    "address": {
+      "address": "Calle Principal 1",
+      "postalCode": "28001",
+      "city": "Madrid",
+      "province": "Madrid",
+      "country": "España"
+    },
+    "links": {
+      "mainWeb": "",
+      "proyectWeb": "",
+      "urlNews": ""
+    },
+    "awards": "",
+    "urlAward": "",
+    "picture": "",
+    "pictures": [],
+    "video": "",
+    "email": "test@example.com",
+    "status": 2
+  }
+]

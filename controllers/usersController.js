@@ -228,37 +228,148 @@ const changePassword = async (req, res) => {
   }
 }
 
-const remove = (req, res) => {
-  const id = req.swagger.params.id.value
-  User.findByIdAndRemove(id, (err, users) => {
-    if (err) {
+const remove = async (req, res) => {
+  const { id } = req.params
+  logger.debug(`Deleting user with id: ${id}`)
+  try {
+    const user = await User.findById(id)
+    if (!user) {
       return res.status(404).json({
-        message: `User not found.User Id: ${id} `,
+        message: USER_NOT_FOUND,
       })
     }
-    return res.status(200).json(users)
-  })
-}
 
-const getAll = (req, res) => {
-  logger.debug(`Getting data from all users`)
-  res.status(200)
-  res.setHeader('Content-Type', 'application/json')
-  try {
-    const cursor = User.find(
-      {},
-      '-password -idAuthor -authToken -google -facebook -favorites',
-    ).cursor()
+    // Check if user has materials associated (either as author or translation author)
+    const materialsCount = await Materials.countDocuments({
+      $or: [{ 'authors.author': id }, { 'translations.authors.author': id }],
+    })
 
-    cursor.pipe(JSONStream.stringify()).pipe(res)
-    // Si ocurre un error en MongoDB mientras se streama:
-    cursor.on('error', (err) => {
-      logger.error(`Cursor error: ${err.message}`)
-      res.status(500).end()
+    if (materialsCount > 0) {
+      // User has materials: deactivate account and scrub credentials to preserve authorship
+      await User.updateOne(
+        { _id: id },
+        {
+          $set: {
+            active: false,
+            password: '',
+            verifyToken: 'DELETED',
+            facebook: null,
+            google: null,
+            favorites: { defaultList: [] },
+            suscription: false,
+            url: '',
+            company: '',
+          },
+        },
+      )
+      logger.info(
+        `User ${id} deactivated (retained for ${materialsCount} materials)`,
+      )
+      return res.status(200).json({
+        message:
+          'User account deactivated because user has associated materials.',
+        materialsCount,
+        deactivated: true,
+      })
+    }
+
+    // User has no materials: hard delete
+    await User.deleteOne({ _id: id })
+    logger.info(`User ${id} completely deleted`)
+    return res.status(200).json({
+      message: 'User account completely removed.',
+      deleted: true,
     })
   } catch (err) {
-    logger.error(`Error getting data from all users: ${err.message} `)
-    return res.status(500).json(err)
+    logger.error(`Error deleting user with id ${id}: ${err.message}`)
+    return res.status(err.httpCode || 500).json({
+      message: `Error deleting user with id ${id}`,
+      error: err.message,
+    })
+  }
+}
+
+const getAll = async (req, res) => {
+  logger.debug('Getting users with pagination and search')
+  try {
+    const { search, role } = req.query
+
+    let limit = parseInt(req.query.limit || req.query.pageSize, 10) || 50
+    if (limit < 1) limit = 50
+    if (limit > 500) limit = 500
+
+    let page = parseInt(req.query.page, 10)
+    let skip = parseInt(req.query.skip, 10)
+
+    if (isNaN(skip)) {
+      if (isNaN(page) || page < 1) page = 1
+      skip = (page - 1) * limit
+    } else {
+      if (skip < 0) skip = 0
+      page = Math.floor(skip / limit) + 1
+    }
+
+    const query = {}
+
+    if (search && typeof search === 'string') {
+      const searchTerm = search.trim()
+      if (searchTerm) {
+        const escaped = searchTerm.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')
+        const regex = new RegExp(escaped, 'i')
+        query.$or = [{ name: regex }, { email: regex }, { company: regex }]
+      }
+    }
+
+    if (role && typeof role === 'string' && role.trim()) {
+      query.role = role.trim()
+    }
+
+    const sortField = req.query.sort || req.query.sortBy || 'name'
+    const sortOrder =
+      req.query.order || req.query.direction || req.query.sortDirection
+    const sortDirection = sortOrder === 'desc' || sortOrder === '-1' ? -1 : 1
+
+    const allowedSortFields = [
+      'name',
+      'email',
+      'role',
+      'locale',
+      'company',
+      'url',
+      'created',
+      'updated',
+    ]
+    const sort = {}
+    if (allowedSortFields.includes(sortField)) {
+      sort[sortField] = sortDirection
+    } else {
+      sort.name = 1
+    }
+
+    const [total, data] = await Promise.all([
+      User.countDocuments(query),
+      User.find(
+        query,
+        '-password -idAuthor -authToken -google -facebook -favorites -__v',
+      )
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ])
+
+    return res.status(200).json({
+      total,
+      data,
+      page,
+      limit,
+    })
+  } catch (err) {
+    logger.error(`Error getting users: ${err.message}`)
+    return res.status(500).json({
+      message: 'Error getting users',
+      error: err.message,
+    })
   }
 }
 

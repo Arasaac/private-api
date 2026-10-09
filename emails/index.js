@@ -361,6 +361,131 @@ const sendBugReportReplyMail = (data) =>
       })
   })
 
+const sendNewWorldLocationEmail = (data) =>
+  new Promise((resolve, reject) => {
+    let worldUrl
+    if (NODE_ENV === 'development') {
+      worldUrl = `${DEV_ARASAAC_URL}/world`
+    } else {
+      worldUrl = `${ARASAAC_URL}/world`
+    }
+    const authorEmail =
+      data.authorEmail || (data.user && data.user.email) || 'arasaac@aragon.es'
+    const authorName =
+      data.authorName || (data.user && data.user.name) || 'Usuario'
+    return contactEmail(authorEmail, authorName)
+      .send({
+        template: 'tplNewWorldLocation',
+        message: {
+          to: 'arasaac@aragon.es',
+        },
+        locals: {
+          name: authorName,
+          locationName: data.name,
+          tipo: data.tipo,
+          city: data.address && data.address.city,
+          country: data.address && data.address.country,
+          description: data.description,
+          locale: 'es',
+          worldUrl,
+        },
+      })
+      .then(() => {
+        logger.debug(`Sent new world location email from user ${authorEmail}`)
+        resolve()
+      })
+      .catch((error) => {
+        logger.error(`Error sending new world location email: ${error}`)
+        reject(
+          new CustomError(
+            `Error sending new world location email from user ${authorEmail}: ${error}`,
+            500,
+          ),
+        )
+      })
+  })
+
+const sendReceivedWorldLocationEmail = (data) =>
+  new Promise((resolve, reject) => {
+    const authorEmail = data.authorEmail || (data.user && data.user.email)
+    const authorName =
+      data.authorName || (data.user && data.user.name) || 'Usuario'
+    if (!authorEmail) {
+      return resolve()
+    }
+    return newEmail
+      .send({
+        template: 'tplReceivedWorldLocation',
+        message: {
+          to: authorEmail,
+        },
+        locals: {
+          name: authorName,
+          locationName: data.name,
+          locale: 'es',
+        },
+      })
+      .then(() => {
+        logger.debug(
+          `Sent received world location email to user ${authorEmail}`,
+        )
+        resolve()
+      })
+      .catch((error) => {
+        logger.error(`Error sending received world location email: ${error}`)
+        reject(
+          new CustomError(
+            `Error sending received world location email to user ${authorEmail}: ${error}`,
+            500,
+          ),
+        )
+      })
+  })
+
+const sendApprovedWorldLocationEmail = (data) =>
+  new Promise((resolve, reject) => {
+    let worldUrl
+    if (NODE_ENV === 'development') {
+      worldUrl = `${DEV_ARASAAC_URL}/world`
+    } else {
+      worldUrl = `${ARASAAC_URL}/world`
+    }
+    const authorEmail = data.authorEmail || (data.user && data.user.email)
+    const authorName =
+      data.authorName || (data.user && data.user.name) || 'Usuario'
+    if (!authorEmail) {
+      return resolve()
+    }
+    return newEmail
+      .send({
+        template: 'tplApprovedWorldLocation',
+        message: {
+          to: authorEmail,
+        },
+        locals: {
+          name: authorName,
+          locationName: data.name,
+          locale: 'es',
+          worldUrl,
+        },
+      })
+      .then(() => {
+        logger.debug(
+          `Sent approved world location email to user ${authorEmail}`,
+        )
+        resolve()
+      })
+      .catch((error) => {
+        logger.error(`Error sending approved world location email: ${error}`)
+        reject(
+          new CustomError(
+            `Error sending approved world location email to user ${authorEmail}: ${error}`,
+            500,
+          ),
+        )
+      })
+  })
+
 module.exports = {
   sendWelcomeMail,
   sendPasswordRecoveryMail,
@@ -369,4 +494,7 @@ module.exports = {
   sendTranslationEmail,
   sendPublishedMaterialEmail,
   sendBugReportReplyMail,
+  sendNewWorldLocationEmail,
+  sendReceivedWorldLocationEmail,
+  sendApprovedWorldLocationEmail,
 }

@@ -1,0 +1,28 @@
+doctype transitional
+html
+  head
+    meta(charset='utf-8')
+    style
+      include style.css
+  </head>
+
+  body
+      p= `${name} ha propuesto una nueva iniciativa en el mapa de ARASAAC en el mundo.`
+      p
+        strong Iniciativa: 
+        span= locationName
+      if tipo
+        p
+          strong Tipo: 
+          span= tipo
+      if city || country
+        p
+          strong Ubicación: 
+          span= `${city ? city + ', ' : ''}${country || ''}`
+      if description
+        p
+          strong Descripción: 
+          span= description
+      br
+      a(href=worldUrl)
+        .button= `Revisar iniciativa`

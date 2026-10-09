@@ -173,6 +173,24 @@ async function seedDatabase() {
       await col.insertMany(docs)
     }
   }
+
+  // 8. Seed worldlocations
+  const worldFile = path.join(fixturesDir, 'world.json')
+  if (fs.existsSync(worldFile)) {
+    const raw = JSON.parse(fs.readFileSync(worldFile, 'utf8'))
+    const docs = raw.map((item) => ({
+      ...item,
+      created: item.created ? new Date(item.created) : new Date(),
+      lastUpdated: item.lastUpdated ? new Date(item.lastUpdated) : new Date(),
+    }))
+    const col = mongoose.connection.collection('worldlocations')
+    await col.deleteMany({})
+    if (docs.length > 0) {
+      await col.insertMany(docs)
+    }
+    await col.createIndex({ id: 1 }, { unique: true })
+    await col.createIndex({ location: '2dsphere' })
+  }
 }
 
 async function clearDatabase() {
@@ -184,6 +202,7 @@ async function clearDatabase() {
     'synsets',
     'keywords',
     'users',
+    'worldlocations',
   ]
   for (const name of collections) {
     try {
