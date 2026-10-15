@@ -12,13 +12,25 @@ const addressSchema = new Schema(
   { _id: false },
 )
 
-const linksSchema = new Schema(
+const linkSchema = new Schema(
   {
-    mainWeb: String,
-    proyectWeb: String,
-    urlNews: String,
+    url: {
+      type: String,
+      alias: 'enlace',
+      required: true,
+    },
+    type: {
+      type: String,
+      alias: 'tipo',
+      default: 'web',
+    },
   },
-  { _id: false },
+  {
+    _id: false,
+    id: false,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  },
 )
 
 const locationSchema = new Schema(
@@ -56,7 +68,7 @@ const worldLocationSchema = new Schema({
   latitude: Number,
   longitude: Number,
   address: addressSchema,
-  links: linksSchema,
+  links: [linkSchema],
   awards: String,
   urlAward: String,
   picture: String,

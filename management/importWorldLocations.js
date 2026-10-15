@@ -105,24 +105,32 @@ function parseCSV(text) {
   return rows
 }
 
-const TIPO_MAP = {
-  ayutamiento: 'Ayuntamiento',
-  ayntamiento: 'Ayuntamiento',
-  ayujntamiento: 'Ayuntamiento',
-  ayuntamienrto: 'Ayuntamiento',
-  asociacion: 'Asociación',
-  bibliotreca: 'Biblioteca',
-  policia: 'Policía',
-  'centro de salud': 'Centro de salud',
-  'servicio salud': 'Centro de salud',
-  salud: 'Centro de salud',
-  'edficio administrativo': 'Edificio Administrativo',
-}
-
 function normalizeTipo(rawTipo) {
   if (!rawTipo) return 'Otro'
-  const key = rawTipo.trim().toLowerCase()
-  return TIPO_MAP[key] || rawTipo.trim()
+  return rawTipo.trim()
+}
+
+function extractLinks(cellValue, linkType) {
+  if (!cellValue) return []
+  // Split on semicolon, but DO NOT split ;jsessionid= or similar query/matrix parameters.
+  // We split on semicolon followed by whitespace or http(s):// or www.
+  const rawParts = cellValue.split(/;\s*(?=(?:https?:\/\/|www\.))/i)
+  const links = []
+
+  for (let raw of rawParts) {
+    let clean = raw.trim().replace(/^;+|;+$/g, '')
+    if (!clean) continue
+    // Fix missing protocol
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      if (clean.includes('@') && !clean.includes('/')) {
+        clean = 'mailto:' + clean
+      } else {
+        clean = 'https://' + clean
+      }
+    }
+    links.push({ url: clean, type: linkType })
+  }
+  return links
 }
 
 function normalizeImageUrl(url) {
@@ -194,9 +202,12 @@ async function run() {
     const province = r[9] ? r[9].trim() : ''
     const country = r[10] ? r[10].trim() : ''
 
-    const mainWeb = r[11] ? r[11].trim() : ''
-    const proyectWeb = r[12] ? r[12].trim() : ''
-    const urlNews = r[13] ? r[13].trim() : ''
+    const links = [
+      ...extractLinks(r[11], 'web'),
+      ...extractLinks(r[12], 'project'),
+      ...extractLinks(r[13], 'news'),
+      ...extractLinks(r[16], 'award'),
+    ]
 
     const description = r[14] ? r[14].trim() : ''
     const awards = r[15] ? r[15].trim() : ''
@@ -230,11 +241,7 @@ async function run() {
         province,
         country,
       },
-      links: {
-        mainWeb,
-        proyectWeb,
-        urlNews,
-      },
+      links,
       awards,
       urlAward,
       picture,

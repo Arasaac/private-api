@@ -16,6 +16,36 @@ const {
 const PUBLISHED = 1
 const PENDING = 2
 
+const normalizeLinks = (links) => {
+  if (!links) return []
+  if (typeof links === 'string') {
+    try {
+      links = JSON.parse(links)
+    } catch (e) {
+      return []
+    }
+  }
+  if (Array.isArray(links)) {
+    return links
+      .map((item) => {
+        if (!item) return null
+        const url = (item.url || item.enlace || '').trim()
+        const type = (item.type || item.tipo || 'web').trim()
+        return url ? { url, type } : null
+      })
+      .filter(Boolean)
+  }
+  if (typeof links === 'object') {
+    const list = []
+    if (links.mainWeb) list.push({ url: links.mainWeb.trim(), type: 'web' })
+    if (links.proyectWeb)
+      list.push({ url: links.proyectWeb.trim(), type: 'project' })
+    if (links.urlNews) list.push({ url: links.urlNews.trim(), type: 'news' })
+    return list
+  }
+  return []
+}
+
 const parseRequestBody = (req) =>
   new Promise((resolve, reject) => {
     if (req.is('multipart/form-data')) {
@@ -230,7 +260,7 @@ const create = async (req, res) => {
         coordinates: [lng, lat],
       },
       address: address || {},
-      links: links || {},
+      links: normalizeLinks(links),
       awards: awards || '',
       urlAward: urlAward || '',
       picture: mainPicture,
@@ -343,7 +373,11 @@ const update = async (req, res) => {
     for (let i = 0; i < allowedFields.length; i++) {
       const field = allowedFields[i]
       if (req.body[field] !== undefined) {
-        location[field] = req.body[field]
+        if (field === 'links') {
+          location.links = normalizeLinks(req.body.links)
+        } else {
+          location[field] = req.body[field]
+        }
       }
     }
 

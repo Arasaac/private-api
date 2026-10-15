@@ -17,11 +17,12 @@
       "province": "Murcia",
       "country": "España"
     },
-    "links": {
-      "mainWeb": "http://www.gabrielperezcarcel.es/",
-      "proyectWeb": "",
-      "urlNews": ""
-    },
+    "links": [
+      {
+        "url": "http://www.gabrielperezcarcel.es/",
+        "type": "web"
+      }
+    ],
     "awards": "",
     "urlAward": "",
     "picture": "https://static.arasaac.org/map/1/grupo_dolor_tea_murcia_1.jpg",
@@ -51,11 +52,12 @@
       "province": "Murcia",
       "country": "España"
     },
-    "links": {
-      "mainWeb": "https://www.murciaeduca.es/ceeparaninosautistas/sitio/",
-      "proyectWeb": "",
-      "urlNews": ""
-    },
+    "links": [
+      {
+        "url": "https://www.murciaeduca.es/ceeparaninosautistas/sitio/",
+        "type": "web"
+      }
+    ],
     "awards": "",
     "urlAward": "",
     "picture": "https://static.arasaac.org/map/2/grupo_dolor_tea_murcia_1.jpg",
@@ -82,11 +84,7 @@
       "province": "Madrid",
       "country": "España"
     },
-    "links": {
-      "mainWeb": "",
-      "proyectWeb": "",
-      "urlNews": ""
-    },
+    "links": [],
     "awards": "",
     "urlAward": "",
     "picture": "",

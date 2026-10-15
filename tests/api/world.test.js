@@ -170,11 +170,11 @@ describe('World API (private-api)', () => {
           province: 'Huesca',
           country: 'España',
         },
-        links: {
-          mainWeb: 'https://huesca.es',
-          proyectWeb: 'https://huesca.es/proyecto',
-          urlNews: 'https://diariodelaltoaragon.es/noticia',
-        },
+        links: [
+          { url: 'https://huesca.es', type: 'web' },
+          { url: 'https://huesca.es/proyecto', type: 'project' },
+          { url: 'https://diariodelaltoaragon.es/noticia', type: 'news' },
+        ],
         picture: 'https://static.arasaac.org/map/hospital_1.jpg',
         pictures: ['https://static.arasaac.org/map/hospital_1.jpg'],
         video: 'https://youtube.com/watch?v=123456',
@@ -192,7 +192,9 @@ describe('World API (private-api)', () => {
       expect(response.body.status).toBe(2) // pending review
       expect(response.body.name).toBe(payload.name)
       expect(response.body.location.coordinates).toEqual([-0.4087, 42.1321])
-      expect(response.body.links.proyectWeb).toBe(payload.links.proyectWeb)
+      expect(response.body.links).toHaveLength(3)
+      expect(response.body.links[1].url).toBe('https://huesca.es/proyecto')
+      expect(response.body.links[1].type).toBe('project')
       expect(response.body.author).toBe('60d5ec49f1b2c82d88c8888a')
       spy.mockRestore()
     })
@@ -219,9 +221,9 @@ describe('World API (private-api)', () => {
         )
         .field(
           'links',
-          JSON.stringify({
-            mainWeb: 'https://bibliotecas.zaragoza.es',
-          }),
+          JSON.stringify([
+            { url: 'https://bibliotecas.zaragoza.es', type: 'web' },
+          ]),
         )
         .attach('images', tempFilePath)
 
@@ -230,6 +232,9 @@ describe('World API (private-api)', () => {
       const createdId = response.body.id
       expect(response.body.status).toBe(2)
       expect(response.body.name).toBe('Biblioteca Central Pictogramas')
+      expect(response.body.links).toHaveLength(1)
+      expect(response.body.links[0].url).toBe('https://bibliotecas.zaragoza.es')
+      expect(response.body.links[0].type).toBe('web')
       expect(response.body.pictures.length).toBe(1)
       expect(response.body.pictures[0]).toBe(
         `https://static.arasaac.org/map/${createdId}/test_image.jpg`,
