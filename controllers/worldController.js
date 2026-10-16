@@ -190,9 +190,15 @@ const create = async (req, res) => {
       email,
     } = data
 
-    if (!name || !tipo) {
+    if (!name || !tipo || !description || !description.trim()) {
       return res.status(422).json({
-        message: 'Name and tipo are required fields',
+        message: 'Name, tipo and description are required fields',
+      })
+    }
+
+    if (description && description.length > 1800) {
+      return res.status(422).json({
+        message: 'Description must not exceed 1800 characters',
       })
     }
 
@@ -223,6 +229,12 @@ const create = async (req, res) => {
         uploadedFiles.push(item)
       }
     })
+
+    if (uploadedFiles.length > 15) {
+      return res.status(422).json({
+        message: 'Maximum 15 photos allowed',
+      })
+    }
 
     if (uploadedFiles.length > 0) {
       const targetDir = path.resolve(MAP_DIR, String(nextId))
@@ -354,6 +366,41 @@ const update = async (req, res) => {
       location.status !== PUBLISHED &&
       req.body.status !== undefined &&
       parseInt(req.body.status, 10) === PUBLISHED
+
+    if (
+      req.body.name !== undefined &&
+      (!req.body.name || !req.body.name.trim())
+    ) {
+      return res.status(422).json({ message: 'Name cannot be empty' })
+    }
+
+    if (
+      req.body.tipo !== undefined &&
+      (!req.body.tipo || !req.body.tipo.trim())
+    ) {
+      return res.status(422).json({ message: 'Tipo cannot be empty' })
+    }
+
+    if (req.body.description !== undefined) {
+      if (!req.body.description || !req.body.description.trim()) {
+        return res.status(422).json({ message: 'Description cannot be empty' })
+      }
+      if (req.body.description.length > 1800) {
+        return res.status(422).json({
+          message: 'Description must not exceed 1800 characters',
+        })
+      }
+    }
+
+    if (
+      req.body.pictures !== undefined &&
+      Array.isArray(req.body.pictures) &&
+      req.body.pictures.length > 15
+    ) {
+      return res.status(422).json({
+        message: 'Maximum 15 photos allowed',
+      })
+    }
 
     const allowedFields = [
       'name',

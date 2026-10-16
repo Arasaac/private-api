@@ -152,6 +152,38 @@ describe('World API (private-api)', () => {
 
       expect(response.status).toBe(422)
       expect(response.body).toHaveProperty('message')
+
+      // Missing description
+      const responseNoDesc = await request(app)
+        .post('/api/world')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          name: 'Centro Test',
+          tipo: 'Salud',
+          latitude: 40.1,
+          longitude: -3.2,
+        })
+      expect(responseNoDesc.status).toBe(422)
+      expect(responseNoDesc.body.message).toContain('description')
+
+      spy.mockRestore()
+    })
+
+    it('should return 422 when description exceeds 1800 characters', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      const response = await request(app)
+        .post('/api/world')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          name: 'Centro Test',
+          tipo: 'Salud',
+          description: 'a'.repeat(1801),
+          latitude: 40.1,
+          longitude: -3.2,
+        })
+
+      expect(response.status).toBe(422)
+      expect(response.body.message).toContain('1800')
       spy.mockRestore()
     })
 
@@ -299,6 +331,33 @@ describe('World API (private-api)', () => {
       const publicResponse = await request(app).get('/api/world/3')
       expect(publicResponse.status).toBe(200)
       expect(publicResponse.body.status).toBe(1)
+
+      spy.mockRestore()
+    })
+
+    it('should return 422 when updating with invalid description or too many photos', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+
+      // Empty description
+      const resEmptyDesc = await request(app)
+        .put('/api/world/3')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ description: '   ' })
+      expect(resEmptyDesc.status).toBe(422)
+
+      // Description > 1800 chars
+      const resLongDesc = await request(app)
+        .put('/api/world/3')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ description: 'a'.repeat(1801) })
+      expect(resLongDesc.status).toBe(422)
+
+      // Pictures > 15
+      const resTooManyPics = await request(app)
+        .put('/api/world/3')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ pictures: Array(16).fill('http://example.com/pic.jpg') })
+      expect(resTooManyPics.status).toBe(422)
 
       spy.mockRestore()
     })
