@@ -390,8 +390,17 @@ describe('World API (private-api)', () => {
       spy.mockRestore()
     })
 
-    it('should allow admin to delete location', async () => {
+    it('should allow admin to delete location and remove its directory from disk', async () => {
       const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      // Create a test directory with a file for location 1
+      const testLocDir = path.resolve(MAP_DIR, '1')
+      await fs.ensureDir(testLocDir)
+      await fs.writeFile(
+        path.resolve(testLocDir, 'test_image.jpg'),
+        'fake content',
+      )
+      expect(await fs.pathExists(testLocDir)).toBe(true)
+
       const response = await request(app)
         .delete('/api/world/1')
         .set('Authorization', `Bearer ${adminToken}`)
@@ -402,10 +411,113 @@ describe('World API (private-api)', () => {
         'Location deleted successfully',
       )
 
-      // Verify it no longer exists
+      // Verify directory on disk was deleted
+      expect(await fs.pathExists(testLocDir)).toBe(false)
+
+      // Verify it no longer exists in DB
       const checkResponse = await request(app).get('/api/world/1')
       expect(checkResponse.status).toBe(404)
 
+      spy.mockRestore()
+    })
+  })
+
+  describe('FTP file sync and unpublish features', () => {
+    it('should dynamically include and remove files placed in MAP_DIR/<id> via FTP as single source of truth', async () => {
+      // For location 2 (published), create a file in MAP_DIR/2
+      const loc2Dir = path.resolve(MAP_DIR, '2')
+      await fs.ensureDir(loc2Dir)
+      await fs.writeFile(path.resolve(loc2Dir, 'ftp_photo.jpg'), 'image data')
+
+      const response = await request(app).get('/api/world/2')
+      expect(response.status).toBe(200)
+      expect(response.body.pictures).toBeDefined()
+      expect(
+        response.body.pictures.some((p) => p.includes('ftp_photo.jpg')),
+      ).toBe(true)
+
+      // Also check GET /api/world
+      const allResponse = await request(app).get('/api/world')
+      expect(allResponse.status).toBe(200)
+      const loc2 = allResponse.body.find((l) => l.id === 2)
+      expect(loc2).toBeDefined()
+      expect(loc2.pictures.some((p) => p.includes('ftp_photo.jpg'))).toBe(true)
+
+      // Delete file from disk (simulating FTP deletion)
+      await fs.remove(path.resolve(loc2Dir, 'ftp_photo.jpg'))
+
+      const afterDeleteRes = await request(app).get('/api/world/2')
+      expect(afterDeleteRes.status).toBe(200)
+      expect(
+        afterDeleteRes.body.pictures.some((p) => p.includes('ftp_photo.jpg')),
+      ).toBe(false)
+
+      // Clean up
+      await fs.remove(loc2Dir)
+    })
+
+    it('should allow admin to unpublish a published location back to pending (status: 2)', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      // Location 2 is published (status: 1). Unpublish it by setting status: 2
+      const updateRes = await request(app)
+        .put('/api/world/2')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 2 })
+
+      expect(updateRes.status).toBe(200)
+      expect(updateRes.body.status).toBe(2)
+
+      // Anonymous users should now NOT see location 2 in GET /api/world
+      const anonRes = await request(app).get('/api/world')
+      expect(anonRes.body.some((l) => l.id === 2)).toBe(false)
+
+      // Admin CAN see it when requesting status=2
+      const adminRes = await request(app)
+        .get('/api/world?status=2')
+        .set('Authorization', `Bearer ${adminToken}`)
+      expect(adminRes.body.some((l) => l.id === 2)).toBe(true)
+
+      // Re-publish it
+      await request(app)
+        .put('/api/world/2')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 1 })
+
+      spy.mockRestore()
+    })
+
+    it('should allow admin to create a location with status 1 (published)', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      const emails = require('../../emails')
+      const emailSpy = jest
+        .spyOn(emails, 'sendApprovedWorldLocationEmail')
+        .mockResolvedValue()
+
+      const payload = {
+        name: 'Iniciativa Creada por Admin',
+        tipo: 'Educación',
+        description: 'Creada directamente como publicada',
+        latitude: 41.3851,
+        longitude: 2.1734,
+        status: 1,
+        email: 'autor_admin@arasaac.org',
+      }
+
+      const res = await request(app)
+        .post('/api/world')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(payload)
+
+      expect(res.status).toBe(201)
+      expect(res.body.status).toBe(1)
+      expect(emailSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Iniciativa Creada por Admin',
+          authorEmail: 'autor_admin@arasaac.org',
+        }),
+      )
+
+      emailSpy.mockRestore()
       spy.mockRestore()
     })
   })

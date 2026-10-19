@@ -7,11 +7,7 @@ const logger = require('../utils/logger')
 const CustomError = require('../utils/CustomError')
 const { MAP_DIR } = require('../utils/constants')
 const { saveFiles } = require('./utils')
-const {
-  sendNewWorldLocationEmail,
-  sendReceivedWorldLocationEmail,
-  sendApprovedWorldLocationEmail,
-} = require('../emails')
+const emails = require('../emails')
 
 const PUBLISHED = 1
 const PENDING = 2
@@ -64,6 +60,31 @@ const parseRequestBody = (req) =>
     }
   })
 
+const getLocationPictures = async (loc) => {
+  if (!loc || !loc.id) return []
+  const dir = path.resolve(MAP_DIR, String(loc.id))
+  try {
+    const exists = await fs.pathExists(dir)
+    if (exists) {
+      const files = await fs.readdir(dir)
+      const imageFiles = files
+        .filter(
+          (f) => !f.startsWith('.') && /\.(jpe?g|png|gif|webp|svg)$/i.test(f),
+        )
+        .sort((a, b) =>
+          a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+        )
+      return imageFiles.map(
+        (f) => `https://static.arasaac.org/map/${loc.id}/${f}`,
+      )
+    }
+  } catch (err) {
+    logger.error(`Error reading map dir for id ${loc.id}: ${err.message}`)
+  }
+  // Fallback if no directory exists yet on disk: preserve existing pictures if any (e.g. fixtures/legacy)
+  return loc.pictures || []
+}
+
 const getAll = async (req, res) => {
   try {
     const { tipo, country, search, status } = req.query
@@ -99,6 +120,13 @@ const getAll = async (req, res) => {
       .sort({ id: 1 })
       .lean()
 
+    await Promise.all(
+      locations.map(async (loc) => {
+        loc.pictures = await getLocationPictures(loc)
+        loc.picture = loc.pictures.length > 0 ? loc.pictures[0] : ''
+      }),
+    )
+
     return res.status(200).json(locations)
   } catch (err) {
     logger.error('Error fetching world locations: ' + err.message)
@@ -130,6 +158,9 @@ const getById = async (req, res) => {
     if (location.status !== PUBLISHED && !isAdmin) {
       return res.status(404).json({ message: 'Location not found' })
     }
+
+    location.pictures = await getLocationPictures(location)
+    location.picture = location.pictures.length > 0 ? location.pictures[0] : ''
 
     return res.status(200).json(location)
   } catch (err) {
@@ -305,32 +336,53 @@ const create = async (req, res) => {
           authorName = userDoc.name
         }
       }
-      // 1. Send notification email to arasaac@aragon.es
-      sendNewWorldLocationEmail({
-        name: saved.name,
-        tipo: saved.tipo,
-        address: saved.address,
-        description: saved.description,
-        authorEmail,
-        authorName,
-      }).catch((e) => {
-        logger.error(
-          'Error sending world location email to ARASAAC: ' + e.message,
-        )
-      })
+      if (status === PUBLISHED) {
+        // Initiative was created in published state (e.g. by admin): notify author that it's published
+        if (authorEmail) {
+          emails
+            .sendApprovedWorldLocationEmail({
+              name: saved.name,
+              authorEmail,
+              authorName,
+            })
+            .catch((e) => {
+              logger.error(
+                'Error sending approved world location email: ' + e.message,
+              )
+            })
+        }
+      } else {
+        // 1. Send notification email to arasaac@aragon.es
+        emails
+          .sendNewWorldLocationEmail({
+            name: saved.name,
+            tipo: saved.tipo,
+            address: saved.address,
+            description: saved.description,
+            authorEmail,
+            authorName,
+          })
+          .catch((e) => {
+            logger.error(
+              'Error sending world location email to ARASAAC: ' + e.message,
+            )
+          })
 
-      // 2. Send receipt confirmation email to author
-      if (authorEmail) {
-        sendReceivedWorldLocationEmail({
-          name: saved.name,
-          authorEmail,
-          authorName,
-        }).catch((e) => {
-          logger.error(
-            'Error sending world location receipt email to author: ' +
-              e.message,
-          )
-        })
+        // 2. Send receipt confirmation email to author
+        if (authorEmail) {
+          emails
+            .sendReceivedWorldLocationEmail({
+              name: saved.name,
+              authorEmail,
+              authorName,
+            })
+            .catch((e) => {
+              logger.error(
+                'Error sending world location receipt email to author: ' +
+                  e.message,
+              )
+            })
+        }
       }
     } catch (err) {
       logger.error('Error dispatching world location email: ' + err.message)
@@ -362,45 +414,127 @@ const update = async (req, res) => {
       return res.status(404).json({ message: 'Location not found' })
     }
 
+    const { fields, files } = await parseRequestBody(req)
+
+    let body = {}
+    if (fields.formData) {
+      try {
+        body =
+          typeof fields.formData === 'string'
+            ? JSON.parse(fields.formData)
+            : fields.formData
+      } catch (e) {
+        body = fields
+      }
+    } else {
+      body = { ...fields }
+    }
+
+    if (typeof body.address === 'string') {
+      try {
+        body.address = JSON.parse(body.address)
+      } catch (e) {}
+    }
+    if (typeof body.links === 'string') {
+      try {
+        body.links = JSON.parse(body.links)
+      } catch (e) {}
+    }
+    if (typeof body.pictures === 'string') {
+      try {
+        body.pictures = JSON.parse(body.pictures)
+      } catch (e) {}
+    }
+
     const wasPublished =
       location.status !== PUBLISHED &&
-      req.body.status !== undefined &&
-      parseInt(req.body.status, 10) === PUBLISHED
+      body.status !== undefined &&
+      parseInt(body.status, 10) === PUBLISHED
 
-    if (
-      req.body.name !== undefined &&
-      (!req.body.name || !req.body.name.trim())
-    ) {
+    if (body.name !== undefined && (!body.name || !body.name.trim())) {
       return res.status(422).json({ message: 'Name cannot be empty' })
     }
 
-    if (
-      req.body.tipo !== undefined &&
-      (!req.body.tipo || !req.body.tipo.trim())
-    ) {
+    if (body.tipo !== undefined && (!body.tipo || !body.tipo.trim())) {
       return res.status(422).json({ message: 'Tipo cannot be empty' })
     }
 
-    if (req.body.description !== undefined) {
-      if (!req.body.description || !req.body.description.trim()) {
+    if (body.description !== undefined) {
+      if (!body.description || !body.description.trim()) {
         return res.status(422).json({ message: 'Description cannot be empty' })
       }
-      if (req.body.description.length > 1800) {
+      if (body.description.length > 1800) {
         return res.status(422).json({
           message: 'Description must not exceed 1800 characters',
         })
       }
     }
 
-    if (
-      req.body.pictures !== undefined &&
-      Array.isArray(req.body.pictures) &&
-      req.body.pictures.length > 15
-    ) {
+    // Process newly uploaded files if any
+    const uploadedFiles = []
+    Object.keys(files || {}).forEach((key) => {
+      const item = files[key]
+      if (Array.isArray(item)) {
+        uploadedFiles.push(...item)
+      } else if (item && item.path) {
+        uploadedFiles.push(item)
+      }
+    })
+
+    const targetDir = path.resolve(MAP_DIR, String(location.id))
+
+    if (uploadedFiles.length > 0) {
+      await saveFiles(uploadedFiles, targetDir)
+    }
+
+    const newUploadedUrls = uploadedFiles.map(
+      (f) => `https://static.arasaac.org/map/${location.id}/${f.name}`,
+    )
+
+    let updatedPictures =
+      body.pictures !== undefined
+        ? Array.isArray(body.pictures)
+          ? [...body.pictures]
+          : [body.pictures]
+        : [...(location.pictures || [])]
+
+    if (newUploadedUrls.length > 0) {
+      updatedPictures = [...updatedPictures, ...newUploadedUrls]
+    }
+
+    if (updatedPictures.length > 15) {
       return res.status(422).json({
         message: 'Maximum 15 photos allowed',
       })
     }
+
+    // Remove deleted local image files from disk
+    if (body.pictures !== undefined && (await fs.pathExists(targetDir))) {
+      const previousPics = await getLocationPictures(location)
+      const remainingNames = updatedPictures
+        .filter((p) => typeof p === 'string')
+        .map((p) => path.basename(p))
+      for (const prevPic of previousPics) {
+        if (
+          typeof prevPic === 'string' &&
+          prevPic.includes(`/map/${location.id}/`)
+        ) {
+          const fileName = path.basename(prevPic)
+          if (!remainingNames.includes(fileName)) {
+            const filePath = path.resolve(targetDir, fileName)
+            if (await fs.pathExists(filePath)) {
+              await fs.remove(filePath).catch(() => {})
+              logger.info(
+                `Removed photo file ${filePath} from location ${location.id}`,
+              )
+            }
+          }
+        }
+      }
+    }
+
+    location.pictures = await getLocationPictures(location)
+    location.picture = location.pictures.length > 0 ? location.pictures[0] : ''
 
     const allowedFields = [
       'name',
@@ -410,8 +544,6 @@ const update = async (req, res) => {
       'links',
       'awards',
       'urlAward',
-      'picture',
-      'pictures',
       'video',
       'email',
       'status',
@@ -419,18 +551,20 @@ const update = async (req, res) => {
 
     for (let i = 0; i < allowedFields.length; i++) {
       const field = allowedFields[i]
-      if (req.body[field] !== undefined) {
+      if (body[field] !== undefined) {
         if (field === 'links') {
-          location.links = normalizeLinks(req.body.links)
+          location.links = normalizeLinks(body.links)
+        } else if (field === 'status') {
+          location.status = parseInt(body.status, 10)
         } else {
-          location[field] = req.body[field]
+          location[field] = body[field]
         }
       }
     }
 
-    if (req.body.latitude !== undefined && req.body.longitude !== undefined) {
-      const lat = parseFloat(req.body.latitude)
-      const lng = parseFloat(req.body.longitude)
+    if (body.latitude !== undefined && body.longitude !== undefined) {
+      const lat = parseFloat(body.latitude)
+      const lng = parseFloat(body.longitude)
       if (!isNaN(lat) && !isNaN(lng)) {
         location.latitude = lat
         location.longitude = lng
@@ -459,15 +593,17 @@ const update = async (req, res) => {
           }
         }
         if (authorEmail) {
-          sendApprovedWorldLocationEmail({
-            name: updated.name,
-            authorEmail,
-            authorName,
-          }).catch((e) => {
-            logger.error(
-              'Error sending approved world location email: ' + e.message,
-            )
-          })
+          emails
+            .sendApprovedWorldLocationEmail({
+              name: updated.name,
+              authorEmail,
+              authorName,
+            })
+            .catch((e) => {
+              logger.error(
+                'Error sending approved world location email: ' + e.message,
+              )
+            })
         }
       } catch (err) {
         logger.error(
@@ -500,6 +636,15 @@ const remove = async (req, res) => {
     const location = await WorldLocation.findOne(query)
     if (!location) {
       return res.status(404).json({ message: 'Location not found' })
+    }
+
+    // Remove initiative files folder from disk
+    const targetDir = path.resolve(MAP_DIR, String(location.id))
+    if (await fs.pathExists(targetDir)) {
+      await fs.remove(targetDir)
+      logger.info(
+        `Removed files directory for world location id ${location.id}: ${targetDir}`,
+      )
     }
 
     await WorldLocation.deleteOne({ _id: location._id })
