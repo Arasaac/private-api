@@ -1,6 +1,7 @@
 const path = require('path')
 const fs = require('fs-extra')
 const formidable = require('formidable')
+const mongoose = require('mongoose')
 const WorldLocation = require('../models/WorldLocation')
 const User = require('../models/User')
 const logger = require('../utils/logger')
@@ -246,6 +247,13 @@ const create = async (req, res) => {
       })
     }
 
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(422).json({
+        message:
+          'Latitude must be between -90 and 90, and longitude between -180 and 180',
+      })
+    }
+
     // Get next sequential id
     const lastLocation = await WorldLocation.findOne().sort({ id: -1 }).lean()
     const nextId = lastLocation && lastLocation.id ? lastLocation.id + 1 : 1
@@ -269,7 +277,17 @@ const create = async (req, res) => {
 
     if (uploadedFiles.length > 0) {
       const targetDir = path.resolve(MAP_DIR, String(nextId))
-      await saveFiles(uploadedFiles, targetDir)
+      try {
+        await saveFiles(uploadedFiles, targetDir)
+      } catch (fileErr) {
+        logger.error(
+          `Error saving uploaded files to ${targetDir}: ${fileErr.message}`,
+        )
+        return res.status(500).json({
+          message: 'Error saving uploaded photos',
+          error: fileErr.message,
+        })
+      }
     }
 
     const uploadedUrls = uploadedFiles.map(
@@ -291,6 +309,14 @@ const create = async (req, res) => {
     const status =
       isAdmin && data.status !== undefined ? parseInt(data.status, 10) : PENDING
 
+    const authorId =
+      req.user &&
+      req.user.id &&
+      mongoose.Types.ObjectId.isValid(req.user.id) &&
+      String(new mongoose.Types.ObjectId(req.user.id)) === String(req.user.id)
+        ? req.user.id
+        : undefined
+
     const newLocation = new WorldLocation({
       id: nextId,
       name,
@@ -311,7 +337,7 @@ const create = async (req, res) => {
       video: video || '',
       email: email || '',
       status,
-      author: req.user && req.user.id ? req.user.id : undefined,
+      author: authorId,
       created: Date.now(),
       lastUpdated: Date.now(),
     })
@@ -329,8 +355,8 @@ const create = async (req, res) => {
     try {
       let authorEmail = email || ''
       let authorName = ''
-      if (req.user && req.user.id) {
-        const userDoc = await User.findById(req.user.id).lean()
+      if (authorId) {
+        const userDoc = await User.findById(authorId).lean()
         if (userDoc) {
           authorEmail = authorEmail || userDoc.email
           authorName = userDoc.name

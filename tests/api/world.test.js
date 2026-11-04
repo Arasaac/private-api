@@ -187,6 +187,26 @@ describe('World API (private-api)', () => {
       spy.mockRestore()
     })
 
+    it('should return 422 when coordinates are out of bounds', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      const response = await request(app)
+        .post('/api/world')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          name: 'Centro Coordenadas Inválidas',
+          tipo: 'Salud',
+          description: 'Prueba coordenadas',
+          latitude: 95.5,
+          longitude: -3.2,
+        })
+
+      expect(response.status).toBe(422)
+      expect(response.body.message).toContain(
+        'Latitude must be between -90 and 90',
+      )
+      spy.mockRestore()
+    })
+
     it('should create new location with status 2 (pending) for regular user', async () => {
       const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
       const payload = {
