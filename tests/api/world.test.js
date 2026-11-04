@@ -88,6 +88,29 @@ describe('World API (private-api)', () => {
       expect(response.body.length).toBe(1)
       expect(response.body[0].id).toBe(3)
       expect(response.body[0].status).toBe(2)
+      expect(response.headers['cache-control']).toContain('no-store')
+      spy.mockRestore()
+    })
+
+    it('should return 401 when invalid/expired token is provided', async () => {
+      const spy = jest
+        .spyOn(axios, 'get')
+        .mockRejectedValue({ response: { status: 400 } })
+      const response = await request(app)
+        .get('/api/world?status=2')
+        .set('Authorization', 'Bearer expired-token')
+
+      expect(response.status).toBe(401)
+      spy.mockRestore()
+    })
+
+    it('should return 403 when non-admin queries by status', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      const response = await request(app)
+        .get('/api/world?status=2')
+        .set('Authorization', `Bearer ${userToken}`)
+
+      expect(response.status).toBe(403)
       spy.mockRestore()
     })
   })

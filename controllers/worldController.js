@@ -50,7 +50,7 @@ const parseRequestBody = (req) =>
         encoding: 'utf-8',
         keepExtensions: true,
         multiples: true,
-        maxFileSize: 100 * 1024 * 1024,
+        maxFileSize: 200 * 1024 * 1024,
       })
       form.parse(req, (err, fields, files) => {
         if (err) return reject(err)
@@ -88,12 +88,25 @@ const getLocationPictures = async (loc) => {
 
 const getAll = async (req, res) => {
   try {
+    res.set(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    )
+    res.set('Pragma', 'no-cache')
+    res.set('Vary', 'Authorization')
+
     const { tipo, country, search, status } = req.query
     const isAdmin = req.user && req.user.role === 'admin'
 
+    // Status filter: only admins can see unpublished / pending
+    if (status !== undefined && !isAdmin) {
+      return res.status(403).json({
+        message: 'Only administrators can filter by status',
+      })
+    }
+
     const query = {}
 
-    // Status filter: only admins can see unpublished / pending
     if (isAdmin && status !== undefined) {
       query.status = parseInt(status, 10)
     } else {
@@ -140,6 +153,13 @@ const getAll = async (req, res) => {
 
 const getById = async (req, res) => {
   try {
+    res.set(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    )
+    res.set('Pragma', 'no-cache')
+    res.set('Vary', 'Authorization')
+
     const { id } = req.params
     const isAdmin = req.user && req.user.role === 'admin'
 

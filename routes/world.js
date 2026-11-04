@@ -3,21 +3,20 @@ const passport = require('passport')
 const { hasRole } = require('../middlewares')
 const worldController = require('../controllers/worldController')
 
-router.get(
-  '/',
-  passport.authenticate(['bearer', 'anonymous'], { session: false }),
-  (req, res) => {
-    worldController.getAll(req, res)
-  },
-)
+const optionalAuth = (req, res, next) => {
+  if (req.headers.authorization) {
+    return passport.authenticate('bearer', { session: false })(req, res, next)
+  }
+  return next()
+}
 
-router.get(
-  '/:id',
-  passport.authenticate(['bearer', 'anonymous'], { session: false }),
-  (req, res) => {
-    worldController.getById(req, res)
-  },
-)
+router.get('/', optionalAuth, (req, res) => {
+  worldController.getAll(req, res)
+})
+
+router.get('/:id', optionalAuth, (req, res) => {
+  worldController.getById(req, res)
+})
 
 router.post(
   '/',
