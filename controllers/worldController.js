@@ -437,6 +437,13 @@ const create = async (req, res) => {
     return res.status(201).json(saved)
   } catch (err) {
     logger.error('Error creating world location: ' + err.message)
+    if (err.message && err.message.toLowerCase().includes('maxfilesize')) {
+      return res.status(413).json({
+        message:
+          'The uploaded files exceed the maximum allowed size (100MB). Please reduce the number or size of photos.',
+        error: err.message,
+      })
+    }
     return res.status(500).json({
       message: 'Error creating world location',
       error: err.message,
@@ -661,6 +668,13 @@ const update = async (req, res) => {
     return res.status(200).json(updated)
   } catch (err) {
     logger.error('Error updating world location: ' + err.message)
+    if (err.message && err.message.toLowerCase().includes('maxfilesize')) {
+      return res.status(413).json({
+        message:
+          'The uploaded files exceed the maximum allowed size (100MB). Please reduce the number or size of photos.',
+        error: err.message,
+      })
+    }
     return res.status(500).json({
       message: 'Error updating world location',
       error: err.message,

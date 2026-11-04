@@ -332,6 +332,31 @@ describe('World API (private-api)', () => {
 
       spy.mockRestore()
     })
+
+    it('should return 413 when uploaded files exceed maxFileSize', async () => {
+      const formidable = require('formidable')
+      const spyParse = jest
+        .spyOn(formidable.IncomingForm.prototype, 'parse')
+        .mockImplementation(function (req, cb) {
+          cb(
+            new Error(
+              'maxFileSize exceeded, received 150000000 bytes of file data',
+            ),
+          )
+        })
+
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      const response = await request(app)
+        .post('/api/world')
+        .set('Authorization', `Bearer ${userToken}`)
+        .field('name', 'Test')
+
+      expect(response.status).toBe(413)
+      expect(response.body.message).toContain('exceed the maximum allowed size')
+
+      spy.mockRestore()
+      spyParse.mockRestore()
+    })
   })
 
   describe('PUT /api/world/:id', () => {
