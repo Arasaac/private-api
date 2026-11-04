@@ -50,7 +50,7 @@ const parseRequestBody = (req) =>
         encoding: 'utf-8',
         keepExtensions: true,
         multiples: true,
-        maxFileSize: 200 * 1024 * 1024,
+        maxFileSize: 100 * 1024 * 1024,
       })
       form.parse(req, (err, fields, files) => {
         if (err) return reject(err)
