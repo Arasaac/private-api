@@ -3,6 +3,7 @@ const User = require('../models/User')
 const axios = require('axios')
 const logger = require('../utils/logger')
 const emails = require('../emails')
+const { forwardTrainingRecord } = require('./aiController')
 
 // Helper to convert base64 image data URL to buffer and mimeType
 const parseBase64Image = (dataurl) => {
@@ -143,6 +144,7 @@ const create = async (req, res) => {
     const postId = postData.id
 
     // 4. Save bug report mapping in MongoDB
+    const trainingData = req.body.trainingData || req.body.llmOutput
     const bugReport = new BugReport({
       postId,
       userEmail: email,
@@ -152,8 +154,23 @@ const create = async (req, res) => {
       fileIds: fileIds,
       locale: locale,
       app,
+      ...(trainingData ? { trainingData } : {}),
     })
     await bugReport.save()
+
+    // 5. If training data was provided, forward it to AI training in Supabase
+    if (trainingData) {
+      try {
+        await forwardTrainingRecord({ req, trainingData })
+        logger.info(
+          `Successfully forwarded training record from bug report for ${email}`,
+        )
+      } catch (trainErr) {
+        logger.warn(
+          `Could not forward training record from bug report: ${trainErr.message}`,
+        )
+      }
+    }
 
     logger.info(
       `Successfully created bug report with Mattermost postId: ${postId} for ${email}`,

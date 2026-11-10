@@ -53,6 +53,57 @@ describe('Bug Reports API (private-api)', () => {
       expect(response.body).toHaveProperty('error', 'User email is required')
       spy.mockRestore()
     })
+
+    it('should create bug report and forward trainingData when provided', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: {} })
+      const originalFetch = global.fetch
+
+      let trainingSubmitted = false
+      global.fetch = jest.fn().mockImplementation(async (url) => {
+        if (url.includes('/api/v4/posts')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'post_123' }),
+          }
+        }
+        if (url.includes('submit-record')) {
+          trainingSubmitted = true
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'train_123', success: true }),
+          }
+        }
+        return { ok: true, status: 200, json: async () => ({}) }
+      })
+
+      const response = await request(app)
+        .post('/api/bug-reports')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          description: 'Traducción incorrecta',
+          activityName: 'Arawrite',
+          metadata: {
+            user: { email: 'admin@arasaac.org', name: 'Admin' },
+            language: 'es',
+            url: 'http://localhost',
+            userAgent: 'test-agent',
+          },
+          trainingData: {
+            source: 'o can come',
+            outcome: 'el perro come',
+            detectedLanguage: 'gl',
+          },
+        })
+
+      expect(response.status).toBe(201)
+      expect(response.body).toHaveProperty('success', true)
+      expect(trainingSubmitted).toBe(true)
+
+      global.fetch = originalFetch
+      spy.mockRestore()
+    })
   })
 
   describe('POST /api/bug-reports/webhook', () => {
