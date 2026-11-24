@@ -38,6 +38,9 @@ require('./crontab')
 // Passport configuration
 require('./auth')
 
+// private-api runs behind traefik: needed for correct client IP / protocol
+app.set('trust proxy', 1)
+
 app.use(cors())
 
 // io.set('origins', '*:*')
@@ -51,6 +54,12 @@ app.set('etag', false)
 
 // parse application/x-www-form-urlencoded
 app.use(bodyParser.urlencoded({ extended: false }))
+
+// shares: small body limit (must be before the global json parser)
+app.use(
+  '/api/shares',
+  bodyParser.json({ limit: '200kb', type: 'application/json' }),
+)
 
 app.use(bodyParser.json({ limit: '50mb', type: 'application/json' }))
 
