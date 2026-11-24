@@ -1,9 +1,12 @@
 const CronJob = require('cron').CronJob
 const logger = require('./utils/logger')
-const updateKeywordsByCrontab = require('./controllers/keywordsController')
-  .updateKeywordsByCrontab
-const { postTranslationStatusByCrontab } = require('./controllers/translationsController')
-const {createSitemap} = require('./controllers/sitemapController.js')
+const updateKeywordsByCrontab =
+  require('./controllers/keywordsController').updateKeywordsByCrontab
+const {
+  postTranslationStatusByCrontab,
+} = require('./controllers/translationsController')
+const { createSitemap } = require('./controllers/sitemapController.js')
+const { cleanOgCache } = require('./controllers/sharesController')
 const languages = require('./utils/languages')
 
 if (process.env.CRONTAB.toUpperCase() === 'YES') {
@@ -12,7 +15,7 @@ if (process.env.CRONTAB.toUpperCase() === 'YES') {
   const job = new CronJob('00 30 * * * *', () => {
     for (const language of languages) {
       const result = updateKeywordsByCrontab(language)
-      if  (result) logger.info(`CRON OK updateKeywords for language ${language}`)
+      if (result) logger.info(`CRON OK updateKeywords for language ${language}`)
       else logger.error(`CRON FAILED updateKeywords for language ${language}`)
     }
   })
@@ -21,6 +24,16 @@ if (process.env.CRONTAB.toUpperCase() === 'YES') {
   const sitemapJob = new CronJob('00 00 3 * * *', () => createSitemap())
   sitemapJob.start()
 
+  // delete cached share preview images (og.png) older than 30 days
+  const sharesOgCleanJob = new CronJob('00 30 4 * * *', async () => {
+    try {
+      const removed = await cleanOgCache()
+      logger.info(`CRON OK cleanOgCache, removed ${removed} files`)
+    } catch (err) {
+      logger.error(`CRON FAILED cleanOgCache: ${err.message}`)
+    }
+  })
+  sharesOgCleanJob.start()
 
   // update translation status, crowdin rate limit is 20 simultaneous requests
   // so we split our languages array and make two cronjobs
@@ -32,8 +45,14 @@ if (process.env.CRONTAB.toUpperCase() === 'YES') {
   const jobFirstHalf = new CronJob('00 10 * * * *', () => {
     for (const language of firstHalfLanguages) {
       const result = postTranslationStatusByCrontab(language)
-      if  (result) logger.info(`CRON OK postTranslationStatusByCrontab for language ${language}`)
-      else logger.error(`CRON FAILED postTranslationStatusByCrontab for language ${language}`)
+      if (result)
+        logger.info(
+          `CRON OK postTranslationStatusByCrontab for language ${language}`,
+        )
+      else
+        logger.error(
+          `CRON FAILED postTranslationStatusByCrontab for language ${language}`,
+        )
     }
   })
   jobFirstHalf.start()
@@ -41,8 +60,14 @@ if (process.env.CRONTAB.toUpperCase() === 'YES') {
   const jobSecondHalf = new CronJob('00 20 * * * *', () => {
     for (const language of secondHalfLanguages) {
       const result = postTranslationStatusByCrontab(language)
-      if  (result) logger.info(`CRON OK postTranslationStatusByCrontab for language ${language}`)
-      else logger.error(`CRON FAILED postTranslationStatusByCrontab for language ${language}`)
+      if (result)
+        logger.info(
+          `CRON OK postTranslationStatusByCrontab for language ${language}`,
+        )
+      else
+        logger.error(
+          `CRON FAILED postTranslationStatusByCrontab for language ${language}`,
+        )
     }
   })
   jobSecondHalf.start()

@@ -1,0 +1,34 @@
+const mongoose = require('mongoose')
+const { Schema } = mongoose
+
+// 24 months without visits
+const SHARE_TTL_SECONDS = 63072000
+
+const ShareSchema = new Schema(
+  {
+    _id: { type: String },
+    ownerId: { type: String, required: true },
+    hash: { type: String, required: true },
+    data: { type: String, required: true },
+    generator: { type: String, required: true },
+    lang: { type: String },
+    title: { type: String, default: '' },
+    pictogramIds: { type: [Number], default: [] },
+    createdAt: { type: Date, default: Date.now },
+    lastAccessedAt: { type: Date, default: Date.now },
+    visits: { type: Number, default: 0 },
+  },
+  { versionKey: false },
+)
+
+ShareSchema.index({ ownerId: 1, hash: 1 }, { unique: true })
+ShareSchema.index({ ownerId: 1, createdAt: -1 })
+ShareSchema.index(
+  { lastAccessedAt: 1 },
+  { expireAfterSeconds: SHARE_TTL_SECONDS },
+)
+
+const Share = mongoose.model('Share', ShareSchema, 'shares')
+
+module.exports = Share
+module.exports.SHARE_TTL_SECONDS = SHARE_TTL_SECONDS
