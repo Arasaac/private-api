@@ -1,3 +1,5 @@
+const constants = require('../../utils/constants')
+const originalAssetsDir = constants.ARACTIVITIES_DIR
 const request = require('supertest')
 const axios = require('axios')
 const crypto = require('crypto')
@@ -30,7 +32,7 @@ const admin = jwt.sign(
   { sub: '60d5ec49f1b2c82d88c88888', role: 'admin' },
   'test_secret',
 )
-const ASSETS_URL = 'https://static.arasaac.org/materials/aractivities'
+const ASSETS_URL = 'https://static.arasaac.org/aractivities'
 
 const encode = (project) =>
   zlib
@@ -139,7 +141,7 @@ beforeAll(async () => {
   cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-og-assets-'))
   assetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-assets-'))
   process.env.SHARES_OG_CACHE_DIR = cacheDir
-  process.env.SHARES_ASSETS_DIR = assetsDir
+  constants.ARACTIVITIES_DIR = assetsDir
   testPicto = await image('png', 500, 500, '#e53935')
   photo1 = await image('webp', 300, 200, '#43a047')
   photo2 = await image('jpeg', 200, 300, '#fdd835')
@@ -152,13 +154,12 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve))
   fs.rmSync(cacheDir, { recursive: true, force: true })
   fs.rmSync(assetsDir, { recursive: true, force: true })
-  delete process.env.SHARES_ASSETS_DIR
+  constants.ARACTIVITIES_DIR = originalAssetsDir
   await db.close()
 })
 
 beforeEach(async () => {
   await Share.deleteMany({})
-  delete process.env.SHARES_ASSETS_URL
   for (const dir of [cacheDir, assetsDir]) {
     fs.readdirSync(dir).forEach((f) =>
       fs.rmSync(path.join(dir, f), { recursive: true, force: true }),
@@ -210,18 +211,6 @@ describe('Shares assets: capture and photos', () => {
       ])
       expect(project.cells.c2.images).toEqual([ref(name2), ref(name1)])
       expect(project.metadata).toEqual({ generator: 'generic' })
-    })
-
-    it('SHARES_ASSETS_URL is read on each request', async () => {
-      process.env.SHARES_ASSETS_URL = 'https://cdn.example.org/acts/'
-      const res = await post(userA, assetsBody())
-      expect(res.body.preview).toBe(
-        `https://cdn.example.org/acts/${res.body.id}/preview.png`,
-      )
-      const doc = await Share.findById(res.body.id).lean()
-      expect(decode(doc.data).cells.c1.images[0].src).toBe(
-        `https://cdn.example.org/acts/${res.body.id}/${sha(photo1)}.webp`,
-      )
     })
 
     it('same photos with other client keys (or no capture): same link, nothing written', async () => {
@@ -704,11 +693,11 @@ describe('Shares assets: capture and photos', () => {
     })
 
     it('cleanShareAssets returns 0 when the folder does not exist', async () => {
-      process.env.SHARES_ASSETS_DIR = path.join(assetsDir, 'missing')
+      constants.ARACTIVITIES_DIR = path.join(assetsDir, 'missing')
       try {
         expect(await cleanShareAssets()).toBe(0)
       } finally {
-        process.env.SHARES_ASSETS_DIR = assetsDir
+        constants.ARACTIVITIES_DIR = assetsDir
       }
     })
   })

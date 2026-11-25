@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit')
 const Share = require('../models/Share')
 const User = require('../models/User')
 const logger = require('../utils/logger')
+const constants = require('../utils/constants')
 const { postToMattermost } = require('../utils/mattermost')
 const {
   normalizeText,
@@ -157,8 +158,6 @@ const checkLimit = (req, res) =>
 // ---- shared assets (activity capture and the author's photos) ----
 // One folder per link in the materials volume, served by static.arasaac.org.
 // Images are checked but never re-encoded: the client already optimized them.
-const DEFAULT_ASSETS_DIR = '/materials/aractivities'
-const DEFAULT_ASSETS_URL = 'https://static.arasaac.org/materials/aractivities'
 const MAX_IMAGES = 30
 const IMAGE_KEY_REGEX = /^[A-Za-z0-9_-]{1,64}$/
 const PHOTO_LIMITS = { maxSide: 1024, maxBytes: 600 * 1024 }
@@ -173,10 +172,9 @@ const TMP_NAME_REGEX = /^\..+\.tmp$/
 // orphan folders younger than this are kept (a link may be being created)
 const ASSETS_MIN_AGE_MS = 60 * 60 * 1000
 
-// read on each call (tests use a temp dir)
-const assetsDir = () => process.env.SHARES_ASSETS_DIR || DEFAULT_ASSETS_DIR
-const assetsUrl = () =>
-  (process.env.SHARES_ASSETS_URL || DEFAULT_ASSETS_URL).replace(/\/+$/, '')
+// read on each call (tests point them to a temp dir)
+const assetsDir = () => constants.ARACTIVITIES_DIR
+const assetsUrl = () => constants.ARACTIVITIES_URL.replace(/\/+$/, '')
 const assetFolder = (id) => path.join(assetsDir(), id)
 const assetUrl = (id, name) => `${assetsUrl()}/${id}/${name}`
 

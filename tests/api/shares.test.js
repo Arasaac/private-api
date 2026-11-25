@@ -1,3 +1,5 @@
+const constants = require('../../utils/constants')
+const originalAssetsDir = constants.ARACTIVITIES_DIR
 const request = require('supertest')
 const axios = require('axios')
 const jwt = require('jsonwebtoken')
@@ -85,7 +87,7 @@ beforeAll(async () => {
   cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-og-test-'))
   process.env.SHARES_OG_CACHE_DIR = cacheDir
   assetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-assets-test-'))
-  process.env.SHARES_ASSETS_DIR = assetsDir
+  constants.ARACTIVITIES_DIR = assetsDir
   testPicto = await sharp({
     create: { width: 500, height: 500, channels: 4, background: '#e53935' },
   })
@@ -101,7 +103,7 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve))
   fs.rmSync(cacheDir, { recursive: true, force: true })
   fs.rmSync(assetsDir, { recursive: true, force: true })
-  delete process.env.SHARES_ASSETS_DIR
+  constants.ARACTIVITIES_DIR = originalAssetsDir
   await db.close()
 })
 
