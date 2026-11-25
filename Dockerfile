@@ -14,6 +14,9 @@ ENV LANGUAGE es_ES.UTF-8
 RUN mkdir /app
 WORKDIR /app
 
+# Fonts for the author's name in share preview images (og.png)
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+
 # Install app dependencies
 COPY package*.json ./
 RUN npm ci --omit=dev
