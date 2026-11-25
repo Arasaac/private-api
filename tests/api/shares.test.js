@@ -794,7 +794,7 @@ describe('Shares API: listing, search and moderation', () => {
         ['description', 'editUrl', 'id', 'listed', 'url'].sort(),
       )
       expect(res.body.listed).toBeNull()
-      expect(res.body.description.length).toBe(500)
+      expect(res.body.description.length).toBe(200)
       expect(res.body.description.startsWith('Aves que vuelan x')).toBe(true)
       const doc = await Share.findById(res.body.id).lean()
       expect(doc.description).toBe(res.body.description)
