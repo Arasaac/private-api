@@ -20,6 +20,7 @@ let axiosSpy
 let postSpy
 let testPicto
 let cacheDir
+let assetsDir
 
 const tokenFor = (sub) => jwt.sign({ sub, role: 'user' }, 'test_secret')
 const userA = tokenFor('60d5ec49f1b2c82d88c8888a')
@@ -36,7 +37,7 @@ const DEFAULT_PICTURE =
 const cacheFile = async (id) => {
   const share = await Share.findById(id).lean()
   const user = await User.findById(share.ownerId).lean()
-  return path.join(cacheDir, `${id}-${ogVersion(share, user)}.png`)
+  return path.join(cacheDir, `${id}-${await ogVersion(share, user)}.png`)
 }
 
 const encode = (project) =>
@@ -83,6 +84,8 @@ beforeAll(async () => {
   app = server
   cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-og-test-'))
   process.env.SHARES_OG_CACHE_DIR = cacheDir
+  assetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-assets-test-'))
+  process.env.SHARES_ASSETS_DIR = assetsDir
   testPicto = await sharp({
     create: { width: 500, height: 500, channels: 4, background: '#e53935' },
   })
@@ -97,6 +100,8 @@ afterAll(async () => {
   postSpy.mockRestore()
   await new Promise((resolve) => server.close(resolve))
   fs.rmSync(cacheDir, { recursive: true, force: true })
+  fs.rmSync(assetsDir, { recursive: true, force: true })
+  delete process.env.SHARES_ASSETS_DIR
   await db.close()
 })
 
@@ -136,8 +141,11 @@ describe('Shares API', () => {
       expect(res.headers['x-robots-tag']).toBe('noindex, nofollow')
       const doc = await Share.findById(res.body.id).lean()
       expect(doc.ownerId).toBe('60d5ec49f1b2c82d88c8888a')
-      expect(doc.pictogramIds).toEqual([100, 200])
       expect(doc.visits).toBe(0)
+      expect(doc).not.toHaveProperty('pictogramIds')
+      expect(doc.preview).toBeNull()
+      expect(doc.images).toEqual([])
+      expect(res.body.preview).toBeNull()
     })
 
     it('returns the same id (200) for the same content', async () => {
@@ -178,12 +186,28 @@ describe('Shares API', () => {
       expect(res.status).toBe(400)
     })
 
-    it('413 when body exceeds 200kb', async () => {
-      const res = await post(
+    it('creating allows 12mb bodies; other routes keep 200kb', async () => {
+      // ~6 MB (the title is trimmed to 100)
+      const big = await post(
         userA,
-        payload(undefined, { title: 'x'.repeat(210 * 1024) }),
+        payload(undefined, { title: 'x'.repeat(6 * 1024 * 1024) }),
       )
-      expect(res.status).toBe(413)
+      expect(big.status).toBe(201)
+      const tooBig = await post(
+        userA,
+        payload(undefined, { title: 'x'.repeat(13 * 1024 * 1024) }),
+      )
+      expect(tooBig.status).toBe(413)
+      const patched = await request(app)
+        .patch(`/api/shares/${big.body.id}`)
+        .set('Authorization', `Bearer ${userA}`)
+        .send({ description: 'x'.repeat(210 * 1024) })
+      expect(patched.status).toBe(413)
+      const reported = await request(app)
+        .post(`/api/shares/${big.body.id}/report`)
+        .set('Authorization', `Bearer ${userB}`)
+        .send({ reason: 'x'.repeat(210 * 1024) })
+      expect(reported.status).toBe(413)
     })
 
     it('strips control characters and trims title to 100', async () => {
@@ -195,16 +219,6 @@ describe('Shares API', () => {
       const doc = await Share.findById(res.body.id).lean()
       expect(doc.title.length).toBe(100)
       expect(doc.title.startsWith('abzzz')).toBe(true)
-    })
-
-    it('limits at most 6 pictogram ids', async () => {
-      const images = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
-        type: 'pictogram',
-        pictogramId: n,
-      }))
-      const res = await post(userA, payload({ cells: { c: { images } } }))
-      const doc = await Share.findById(res.body.id).lean()
-      expect(doc.pictogramIds).toEqual([1, 2, 3, 4, 5, 6])
     })
 
     it('429 after exceeding the daily limit per user', async () => {
@@ -255,6 +269,8 @@ describe('Shares API', () => {
         listed: null,
         hidden: false,
         featured: false,
+        preview: null,
+        imagesCount: 0,
       })
       expect(res.body[0]).not.toHaveProperty('data')
     })
@@ -283,6 +299,8 @@ describe('Shares API', () => {
           name: 'Normal User',
           picture: DEFAULT_PICTURE,
         },
+        preview: null,
+        images: [],
       })
       expect(res.headers['x-robots-tag']).toBe('noindex, nofollow')
       const doc = await Share.findById(created.id).lean()
@@ -379,7 +397,7 @@ describe('Shares API', () => {
           res.on('end', () => cb(null, Buffer.concat(chunks)))
         })
 
-    it('200 image/png 1200x630 under 300KB, cached on disk', async () => {
+    it('200 image/png 1200x630 under 300KB, cached on disk (no capture: author only)', async () => {
       const { body: created } = await post(userA, payload())
       const res = await getImage(created.id)
       expect(res.status).toBe(200)
@@ -393,16 +411,8 @@ describe('Shares API', () => {
         new RegExp(`^${created.id}-[0-9a-f]{10}\\.png$`),
       )
       expect(fs.existsSync(file)).toBe(true)
-      // pictograms 100 and 200 and the author's avatar were downloaded
-      expect(
-        pictoCalls()
-          .map(([u]) => u)
-          .sort(),
-      ).toEqual([
-        'https://static.arasaac.org/pictograms/100/100_500.png',
-        'https://static.arasaac.org/pictograms/200/200_500.png',
-        DEFAULT_PICTURE,
-      ])
+      // only the author's avatar is downloaded (no pictograms)
+      expect(pictoCalls().map(([u]) => u)).toEqual([DEFAULT_PICTURE])
       expect(pictoCalls()[0][1]).toMatchObject({ timeout: 5000 })
     })
 
@@ -416,7 +426,7 @@ describe('Shares API', () => {
       expect(second.body.equals(first.body)).toBe(true)
     })
 
-    it('still 200 when downloads fail (generic image, not cached)', async () => {
+    it('still 200 when downloads fail (not cached)', async () => {
       const { body: created } = await post(userA, payload())
       axiosSpy.mockImplementation(async () => {
         throw new Error('network down')
@@ -427,25 +437,6 @@ describe('Shares API', () => {
       const meta = await sharp(res.body).metadata()
       expect([meta.width, meta.height]).toEqual([1200, 630])
       expect(fs.readdirSync(cacheDir)).toEqual([])
-    })
-
-    it('uses the pictograms that could be downloaded', async () => {
-      const { body: created } = await post(userA, payload())
-      axiosSpy.mockImplementation(async (url) => {
-        if (String(url).includes('/100/')) throw new Error('boom')
-        return { data: testPicto }
-      })
-      const res = await getImage(created.id)
-      expect(res.status).toBe(200)
-      expect((await sharp(res.body).metadata()).width).toBe(1200)
-    })
-
-    it('generic image when the share has no pictograms', async () => {
-      const { body: created } = await post(userA, payload({ cells: { c: {} } }))
-      const res = await getImage(created.id)
-      expect(res.status).toBe(200)
-      // only the author's avatar
-      expect(pictoCalls().map(([u]) => u)).toEqual([DEFAULT_PICTURE])
     })
 
     it('404 for unknown or malformed ids', async () => {
@@ -791,7 +782,7 @@ describe('Shares API: listing, search and moderation', () => {
       )
       expect(res.status).toBe(201)
       expect(Object.keys(res.body).sort()).toEqual(
-        ['description', 'editUrl', 'id', 'listed', 'url'].sort(),
+        ['description', 'editUrl', 'id', 'listed', 'preview', 'url'].sort(),
       )
       expect(res.body.listed).toBeNull()
       expect(res.body.description.length).toBe(200)
@@ -824,6 +815,7 @@ describe('Shares API: listing, search and moderation', () => {
         editUrl: first.body.editUrl,
         listed: true,
         description: 'uno',
+        preview: null,
       })
       const doc = await Share.findById(first.body.id).lean()
       expect(doc.description).toBe('uno')
@@ -860,6 +852,8 @@ describe('Shares API: listing, search and moderation', () => {
         listed: true,
         hidden: false,
         featured: false,
+        preview: null,
+        imagesCount: 0,
       })
       const doc = await Share.findById(id).lean()
       expect(doc.listedAt.getTime()).toBeGreaterThanOrEqual(before - 1000)
@@ -984,6 +978,7 @@ describe('Shares API: listing, search and moderation', () => {
           name: 'Normal User',
           picture: DEFAULT_PICTURE,
         },
+        preview: null,
       })
       expect(byId[g].author).toEqual({
         id: GOOGLE_ID,
@@ -1309,12 +1304,12 @@ describe('Shares API: listing, search and moderation', () => {
       }
     })
 
-    it('without a user only the pictograms are drawn', async () => {
+    it('without a user nor a capture: the generic image', async () => {
       const id = await make(userB)
       const res = await getImage(id)
       expect(res.status).toBe(200)
       expect((await sharp(res.body).metadata()).height).toBe(630)
-      expect(urls().filter((u) => u.includes('28307'))).toEqual([])
+      expect(urls().filter((u) => !u.includes('/tokeninfo'))).toEqual([])
     })
 
     it('page uses the description and prefixes the author name', async () => {

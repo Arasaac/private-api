@@ -6,7 +6,10 @@ const {
   postTranslationStatusByCrontab,
 } = require('./controllers/translationsController')
 const { createSitemap } = require('./controllers/sitemapController.js')
-const { cleanOgCache } = require('./controllers/sharesController')
+const {
+  cleanOgCache,
+  cleanShareAssets,
+} = require('./controllers/sharesController')
 const languages = require('./utils/languages')
 
 if (process.env.CRONTAB.toUpperCase() === 'YES') {
@@ -34,6 +37,17 @@ if (process.env.CRONTAB.toUpperCase() === 'YES') {
     }
   })
   sharesOgCleanJob.start()
+
+  // delete asset folders (capture and photos) of links that no longer exist
+  const sharesAssetsCleanJob = new CronJob('00 45 4 * * *', async () => {
+    try {
+      const removed = await cleanShareAssets()
+      logger.info(`CRON OK cleanShareAssets, removed ${removed} folders`)
+    } catch (err) {
+      logger.error(`CRON FAILED cleanShareAssets: ${err.message}`)
+    }
+  })
+  sharesAssetsCleanJob.start()
 
   // update translation status, crowdin rate limit is 20 simultaneous requests
   // so we split our languages array and make two cronjobs

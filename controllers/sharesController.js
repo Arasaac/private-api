@@ -50,7 +50,6 @@ const MAX_SEARCH_CANDIDATES = 5000
 const DEFAULT_SEARCH_LIMIT = 24
 const MAX_SEARCH_LIMIT = 48
 const DEFAULT_REPORT_HIDE_THRESHOLD = 3
-const MAX_PICTOGRAMS = 6
 const MAX_INFLATED_BYTES = 20 * 1024 * 1024
 
 const escapeHtml = (value) =>
@@ -104,24 +103,6 @@ const decodeProject = (data) => {
   }
 }
 
-const extractPictogramIds = (cells) => {
-  const ids = new Set()
-  Object.values(cells).forEach((cell) => {
-    const images = cell && Array.isArray(cell.images) ? cell.images : []
-    images.forEach((img) => {
-      if (
-        img &&
-        (img.type === undefined || img.type === 'pictogram') &&
-        Number.isInteger(img.pictogramId) &&
-        img.pictogramId > 0
-      ) {
-        ids.add(img.pictogramId)
-      }
-    })
-  })
-  return [...ids].slice(0, MAX_PICTOGRAMS)
-}
-
 // ---- authors ----
 
 // facebook pictures expire, so only google pictures are used
@@ -173,20 +154,268 @@ const checkLimit = (req, res) =>
     (ok) => ok,
   )
 
+// ---- shared assets (activity capture and the author's photos) ----
+// One folder per link in the materials volume, served by static.arasaac.org.
+// Images are checked but never re-encoded: the client already optimized them.
+const DEFAULT_ASSETS_DIR = '/materials/aractivities'
+const DEFAULT_ASSETS_URL = 'https://static.arasaac.org/materials/aractivities'
+const MAX_IMAGES = 30
+const IMAGE_KEY_REGEX = /^[A-Za-z0-9_-]{1,64}$/
+const PHOTO_LIMITS = { maxSide: 1024, maxBytes: 600 * 1024 }
+const PREVIEW_LIMITS = { maxSide: 1600, maxBytes: 500 * 1024 }
+// sharp format -> file extension
+const IMAGE_FORMATS = { webp: 'webp', jpeg: 'jpg', png: 'png' }
+const DATA_URL_REGEX =
+  /^data:image\/(?:webp|jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/
+const PREVIEW_NAME_REGEX = /^preview\.(?:webp|jpg|png)$/
+const PHOTO_NAME_REGEX = /^[0-9a-f]{16}\.(?:webp|jpg|png)$/
+const TMP_NAME_REGEX = /^\..+\.tmp$/
+// orphan folders younger than this are kept (a link may be being created)
+const ASSETS_MIN_AGE_MS = 60 * 60 * 1000
+
+// read on each call (tests use a temp dir)
+const assetsDir = () => process.env.SHARES_ASSETS_DIR || DEFAULT_ASSETS_DIR
+const assetsUrl = () =>
+  (process.env.SHARES_ASSETS_URL || DEFAULT_ASSETS_URL).replace(/\/+$/, '')
+const assetFolder = (id) => path.join(assetsDir(), id)
+const assetUrl = (id, name) => `${assetsUrl()}/${id}/${name}`
+
+const isPreviewName = (name) =>
+  typeof name === 'string' && PREVIEW_NAME_REGEX.test(name)
+
+const previewUrl = (share) =>
+  share && isPreviewName(share.preview)
+    ? assetUrl(share._id, share.preview)
+    : null
+
+const imageUrls = (share) =>
+  ((share && share.images) || []).map((name) => assetUrl(share._id, name))
+
+const sha256 = (value) =>
+  crypto.createHash('sha256').update(value).digest('hex')
+
+// a 400 for the client
+class AssetError extends Error {}
+
+// decodes and checks a data URL image: { bytes, ext }
+const readImage = async (value, limits, label) => {
+  if (typeof value !== 'string') throw new AssetError(`Invalid ${label}`)
+  // cheap check before decoding (base64 is 4/3 of the bytes)
+  if (value.length > Math.ceil((limits.maxBytes * 4) / 3) + 64) {
+    throw new AssetError(`${label} too large (max ${limits.maxBytes} bytes)`)
+  }
+  const match = DATA_URL_REGEX.exec(value)
+  if (!match) throw new AssetError(`Invalid ${label}`)
+  const bytes = Buffer.from(match[1], 'base64')
+  if (bytes.length > limits.maxBytes) {
+    throw new AssetError(`${label} too large (max ${limits.maxBytes} bytes)`)
+  }
+  let meta
+  try {
+    meta = await sharp(bytes).metadata()
+  } catch (err) {
+    throw new AssetError(`Invalid ${label}`)
+  }
+  const ext = IMAGE_FORMATS[meta.format]
+  if (!ext) throw new AssetError(`Invalid ${label} format`)
+  if (
+    !meta.width ||
+    !meta.height ||
+    meta.width > limits.maxSide ||
+    meta.height > limits.maxSide
+  ) {
+    throw new AssetError(`${label} too large (max ${limits.maxSide} px)`)
+  }
+  if (meta.exif) throw new AssetError(`${label} must not have EXIF data`)
+  if ((meta.pages || 1) > 1)
+    throw new AssetError(`${label} must not be animated`)
+  return { bytes, ext }
+}
+
+// every { type: 'sharedImage' } object in the project (iterative walk)
+const findSharedImages = (project) => {
+  const refs = []
+  const stack = [project]
+  while (stack.length) {
+    const node = stack.pop()
+    if (!Array.isArray(node) && node.type === 'sharedImage') refs.push(node)
+    Object.values(node).forEach((value) => {
+      if (value && typeof value === 'object') stack.push(value)
+    })
+  }
+  return refs
+}
+
+// Checks the photos and the capture of a new link and replaces, in the
+// project, each client key with the final file name (and src with ''), so the
+// same photos give the same hash whatever the client keys.
+// Returns { refs, photos: [{ name, bytes }], preview: { name, bytes } | null }
+const prepareAssets = async (project, images, preview) => {
+  if (
+    images !== undefined &&
+    images !== null &&
+    (typeof images !== 'object' || Array.isArray(images))
+  ) {
+    throw new AssetError('Invalid images')
+  }
+  const keys = images ? Object.keys(images) : []
+  if (keys.length > MAX_IMAGES) {
+    throw new AssetError(`Too many images (max ${MAX_IMAGES})`)
+  }
+  if (keys.some((key) => !IMAGE_KEY_REGEX.test(key))) {
+    throw new AssetError('Invalid image key')
+  }
+  const refs = findSharedImages(project)
+  const referenced = new Set()
+  refs.forEach((ref) => {
+    if (typeof ref.file !== 'string' || !IMAGE_KEY_REGEX.test(ref.file)) {
+      throw new AssetError('Invalid shared image')
+    }
+    referenced.add(ref.file)
+  })
+  const given = new Set(keys)
+  const missing = [...referenced].filter((key) => !given.has(key))
+  if (missing.length) {
+    throw new AssetError(`Missing images: ${missing.join(', ')}`)
+  }
+  const unused = keys.filter((key) => !referenced.has(key))
+  if (unused.length) {
+    throw new AssetError(
+      `Images not used in the activity: ${unused.join(', ')}`,
+    )
+  }
+
+  // one by one: bounded memory
+  const names = new Map()
+  const photos = new Map()
+  for (const key of keys) {
+    const { bytes, ext } = await readImage(
+      images[key],
+      PHOTO_LIMITS,
+      `Image ${key}`,
+    )
+    const name = `${sha256(bytes).slice(0, 16)}.${ext}`
+    names.set(key, name)
+    photos.set(name, { name, bytes })
+  }
+  let capture = null
+  if (preview !== undefined && preview !== null) {
+    const { bytes, ext } = await readImage(preview, PREVIEW_LIMITS, 'Preview')
+    capture = { name: `preview.${ext}`, bytes }
+  }
+  refs.forEach((ref) => {
+    ref.file = names.get(ref.file)
+    ref.src = ''
+  })
+  return { refs, photos: [...photos.values()], preview: capture }
+}
+
+const encodeProject = (project) =>
+  zlib
+    .deflateRawSync(Buffer.from(JSON.stringify(project), 'utf8'))
+    .toString('base64url')
+
+const removeAssets = async (id) => {
+  if (!ID_REGEX.test(id)) return
+  try {
+    await fs.promises.rm(assetFolder(id), { recursive: true, force: true })
+  } catch (err) {
+    logger.warn(`Could not remove the assets of share ${id}: ${err.message}`)
+  }
+}
+
+// Writes the files in a new folder for `id`. The folder must not exist
+// (EEXIST is thrown as is, so the caller tries another id).
+const writeAssets = async (id, files) => {
+  await fs.promises.mkdir(assetsDir(), { recursive: true })
+  const folder = assetFolder(id)
+  await fs.promises.mkdir(folder)
+  try {
+    for (const { name, bytes } of files) {
+      const tmp = path.join(folder, `.${name}.${process.pid}.tmp`)
+      await fs.promises.writeFile(tmp, bytes)
+      await fs.promises.rename(tmp, path.join(folder, name))
+    }
+  } catch (err) {
+    await removeAssets(id)
+    throw err
+  }
+}
+
+// only folders made by writeAssets (never something else in the volume)
+const isAssetsFolder = async (folder) => {
+  const files = await fs.promises.readdir(folder)
+  return files.every(
+    (f) =>
+      PHOTO_NAME_REGEX.test(f) ||
+      PREVIEW_NAME_REGEX.test(f) ||
+      TMP_NAME_REGEX.test(f),
+  )
+}
+
+// Used by crontab: removes asset folders of links that no longer exist
+// (expired by the TTL index or deleted). Returns the number removed.
+const cleanShareAssets = async () => {
+  const dir = assetsDir()
+  let entries
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch (err) {
+    return 0
+  }
+  const limit = Date.now() - ASSETS_MIN_AGE_MS
+  const candidates = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !ID_REGEX.test(entry.name)) continue
+    try {
+      const folder = path.join(dir, entry.name)
+      const stat = await fs.promises.stat(folder)
+      if (stat.mtimeMs < limit && (await isAssetsFolder(folder))) {
+        candidates.push(entry.name)
+      }
+    } catch (err) {
+      logger.warn(`Assets cleanup failed for ${entry.name}: ${err.message}`)
+    }
+  }
+  let removed = 0
+  for (let i = 0; i < candidates.length; i += 500) {
+    const batch = candidates.slice(i, i + 500)
+    const existing = await Share.find(
+      { _id: { $in: batch } },
+      { _id: 1 },
+    ).lean()
+    const alive = new Set(existing.map((s) => String(s._id)))
+    for (const id of batch) {
+      if (alive.has(id)) continue
+      try {
+        await fs.promises.rm(path.join(dir, id), {
+          recursive: true,
+          force: true,
+        })
+        removed++
+      } catch (err) {
+        logger.warn(`Assets cleanup failed for ${id}: ${err.message}`)
+      }
+    }
+  }
+  return removed
+}
+
 // ---- og.png (social preview image) ----
-// Pictograms of the activity plus the author's avatar and name, resolved from
-// the User at request time. The cache file name includes a version hash of
-// everything drawn, so a new avatar or name produces a new image.
-const OG_LAYOUT_VERSION = 2
+// The activity capture with the author's avatar and name below, resolved from
+// the User at request time. Without a capture, the author alone; without both,
+// a generic image. The cache file name includes a version hash of everything
+// drawn, so a new avatar, name or capture produces a new image.
+const OG_LAYOUT_VERSION = 3
 const OG_WIDTH = 1200
 const OG_HEIGHT = 630
 const OG_MAX_BYTES = 300 * 1024
 const OG_GREEN = '#8bc34a'
 const OG_GENERIC = path.join(__dirname, '..', 'assets', 'og', 'generic.png')
-const PICTO_SIZE = 160
-const PICTO_GAP = 24
-const BOX_PADDING = 40
 const OG_MARGIN = 40
+const PREVIEW_PADDING = 12
+const PREVIEW_RADIUS = 28
+const PREVIEW_ROW_GAP = 30
 const AVATAR_SIZE = 110
 const AVATAR_LARGE_SIZE = 240
 const AVATAR_RING = 6
@@ -202,21 +431,50 @@ const ogCacheDir = () =>
   process.env.SHARES_OG_CACHE_DIR || path.join(os.tmpdir(), 'shares-og')
 const ogCachePath = (id, v) => path.join(ogCacheDir(), `${id}-${v}.png`)
 
-// what is drawn for a share: pictograms + author (null if no user)
-const ogContent = (share, user) => ({
-  pictogramIds: ((share && share.pictogramIds) || []).slice(0, MAX_PICTOGRAMS),
+// the capture file of a share: { file, name, size, mtimeMs } or null
+const previewFile = async (share) => {
+  if (!share || !ID_REGEX.test(String(share._id))) return null
+  if (!isPreviewName(share.preview)) return null
+  const file = path.join(assetFolder(String(share._id)), share.preview)
+  try {
+    const stat = await fs.promises.stat(file)
+    if (!stat.isFile()) return null
+    return {
+      file,
+      name: share.preview,
+      size: stat.size,
+      mtimeMs: Math.floor(stat.mtimeMs),
+    }
+  } catch (err) {
+    return null
+  }
+}
+
+// what is drawn for a share: author (null if no user)
+const ogContent = (user) => ({
   avatarUrl: user ? pictureFor(user) : null,
   name: user ? cleanText(user.name, MAX_TITLE) : '',
 })
 
-const ogVersion = (share, user) => {
-  const { pictogramIds, avatarUrl, name } = ogContent(share, user)
+const versionFor = (user, preview) => {
+  const { avatarUrl, name } = ogContent(user)
   return crypto
     .createHash('sha1')
-    .update(JSON.stringify([OG_LAYOUT_VERSION, pictogramIds, avatarUrl, name]))
+    .update(
+      JSON.stringify([
+        OG_LAYOUT_VERSION,
+        avatarUrl,
+        name,
+        preview ? [preview.name, preview.size, preview.mtimeMs] : null,
+      ]),
+    )
     .digest('hex')
     .slice(0, 10)
 }
+
+// async: the capture file (its size and mtime) is part of the version
+const ogVersion = async (share, user) =>
+  versionFor(user, await previewFile(share))
 
 const toPng = async (image) => {
   let buffer = await image.png({ compressionLevel: 9 }).toBuffer()
@@ -238,9 +496,9 @@ const background = () =>
     },
   })
 
-const roundedBox = (width, height) =>
+const roundedRect = (width, height, radius) =>
   Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="36" ry="36" fill="#ffffff"/></svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="#ffffff"/></svg>`,
   )
 
 // Generic image: a white rounded box centered on green. No logo, no text.
@@ -250,7 +508,7 @@ const buildGenericImage = async () => {
   return toPng(
     background().composite([
       {
-        input: roundedBox(width, height),
+        input: roundedRect(width, height, 36),
         left: Math.round((OG_WIDTH - width) / 2),
         top: Math.round((OG_HEIGHT - height) / 2),
       },
@@ -274,19 +532,6 @@ const download = async (url) => {
     maxContentLength: 5 * 1024 * 1024,
   })
   return Buffer.from(res.data)
-}
-
-const downloadPictogram = async (id) => {
-  const data = await download(
-    `https://static.arasaac.org/pictograms/${id}/${id}_500.png`,
-  )
-  return sharp(data)
-    .resize(PICTO_SIZE, PICTO_SIZE, {
-      fit: 'contain',
-      background: { r: 255, g: 255, b: 255, alpha: 0 },
-    })
-    .png()
-    .toBuffer()
 }
 
 // only https from known hosts (avoid SSRF)
@@ -392,22 +637,59 @@ const renderName = async (name, maxWidth) => {
   }
 }
 
-const pictogramsLayers = (pictos, top) => {
-  const n = pictos.length
-  const boxWidth = n * PICTO_SIZE + (n - 1) * PICTO_GAP + 2 * BOX_PADDING
-  const boxHeight = PICTO_SIZE + 2 * BOX_PADDING
-  const boxLeft = Math.round((OG_WIDTH - boxWidth) / 2)
-  return [
-    { input: roundedBox(boxWidth, boxHeight), left: boxLeft, top },
-    ...pictos.map((input, i) => ({
-      input,
-      left: boxLeft + BOX_PADDING + i * (PICTO_SIZE + PICTO_GAP),
-      top: top + BOX_PADDING,
-    })),
-  ]
+// the capture, flattened on white and at most the og size (null if unreadable)
+const loadPreview = async (preview) => {
+  try {
+    return await sharp(preview.file)
+      .flatten({ background: '#ffffff' })
+      .resize(OG_WIDTH, OG_HEIGHT, { fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer()
+  } catch (err) {
+    logger.warn(`og.png: could not read ${preview.file}: ${err.message}`)
+    return null
+  }
 }
 
-// avatar large and centered with the name under it (no pictograms)
+// the capture scaled to fit (contain) in a white rounded box, centered in the
+// area between top and bottom
+const previewLayer = async (capture, top, bottom) => {
+  const maxWidth = OG_WIDTH - 2 * OG_MARGIN - 2 * PREVIEW_PADDING
+  const maxHeight = bottom - top - 2 * PREVIEW_PADDING
+  const { data, info } = await sharp(capture)
+    .resize(maxWidth, maxHeight, { fit: 'inside' })
+    .png()
+    .toBuffer({ resolveWithObject: true })
+  const rounded = await sharp(data)
+    .ensureAlpha()
+    .composite([
+      {
+        input: roundedRect(
+          info.width,
+          info.height,
+          PREVIEW_RADIUS - PREVIEW_PADDING,
+        ),
+        blend: 'dest-in',
+      },
+    ])
+    .png()
+    .toBuffer()
+  const width = info.width + 2 * PREVIEW_PADDING
+  const height = info.height + 2 * PREVIEW_PADDING
+  const box = await sharp(roundedRect(width, height, PREVIEW_RADIUS))
+    .composite([
+      { input: rounded, left: PREVIEW_PADDING, top: PREVIEW_PADDING },
+    ])
+    .png()
+    .toBuffer()
+  return {
+    input: box,
+    left: Math.round((OG_WIDTH - width) / 2),
+    top: Math.round(top + (bottom - top - height) / 2),
+  }
+}
+
+// avatar large and centered with the name under it
 const authorOnlyLayers = (avatar, avatarOuter, nameLayer) => {
   const gap = avatar && nameLayer ? 30 : 0
   const height =
@@ -432,14 +714,15 @@ const authorOnlyLayers = (avatar, avatarOuter, nameLayer) => {
   return layers
 }
 
-// pictograms box in the upper area, avatar + name row at the bottom
-const pictogramsAndAuthorLayers = (pictos, avatar, avatarOuter, nameLayer) => {
+// avatar + name row at the bottom: { layers, top } (top of the row, or the
+// bottom margin when there is nothing to draw)
+const authorRowLayers = (avatar, avatarOuter, nameLayer) => {
   const rowHeight = Math.max(
     avatar ? avatarOuter : 0,
     nameLayer ? nameLayer.height : 0,
   )
   const rowTop = OG_HEIGHT - OG_MARGIN - rowHeight
-  const row = []
+  const layers = []
   if (rowHeight > 0) {
     const rowWidth =
       (avatar ? avatarOuter : 0) +
@@ -447,7 +730,7 @@ const pictogramsAndAuthorLayers = (pictos, avatar, avatarOuter, nameLayer) => {
       (nameLayer ? nameLayer.width : 0)
     let left = Math.round((OG_WIDTH - rowWidth) / 2)
     if (avatar) {
-      row.push({
+      layers.push({
         input: avatar,
         left,
         top: rowTop + Math.round((rowHeight - avatarOuter) / 2),
@@ -455,63 +738,54 @@ const pictogramsAndAuthorLayers = (pictos, avatar, avatarOuter, nameLayer) => {
       left += avatarOuter + NAME_GAP
     }
     if (nameLayer) {
-      row.push({
+      layers.push({
         input: nameLayer.input,
         left,
         top: rowTop + Math.round((rowHeight - nameLayer.height) / 2),
       })
     }
   }
-  const boxHeight = PICTO_SIZE + 2 * BOX_PADDING
-  const areaBottom = rowHeight > 0 ? rowTop - 30 : OG_HEIGHT - OG_MARGIN
-  const boxTop = Math.max(
-    OG_MARGIN,
-    Math.round(OG_MARGIN + (areaBottom - OG_MARGIN - boxHeight) / 2),
-  )
-  return [...pictogramsLayers(pictos, boxTop), ...row]
+  return { layers, top: rowHeight > 0 ? rowTop : null }
 }
 
-// returns { buffer, complete }: complete=false if any download failed
-const buildShareImage = async (share, user) => {
-  const { pictogramIds, avatarUrl, name } = ogContent(share, user)
-  const results = await Promise.all(
-    pictogramIds.map((id) =>
-      downloadPictogram(id).catch((err) => {
-        logger.debug(`og.png: could not get pictogram ${id}: ${err.message}`)
-        return null
-      }),
-    ),
-  )
-  const pictos = results.filter(Boolean)
-  let complete = pictos.length === pictogramIds.length
+// returns { buffer, complete }: complete=false if anything could not be got.
+// `preview` (from previewFile) is looked up when not given.
+const buildShareImage = async (share, user, preview) => {
+  const info = preview === undefined ? await previewFile(share) : preview
+  const capture = info ? await loadPreview(info) : null
+  let complete = !info || !!capture
+  const { avatarUrl, name } = ogContent(user)
 
-  if (!user) {
-    if (pictos.length === 0) {
-      return { buffer: await getGenericImage(), complete: false }
+  if (capture) {
+    let row = { layers: [], top: null }
+    if (user) {
+      const avatarOuter = AVATAR_SIZE + 2 * AVATAR_RING
+      const avatar = await buildAvatar(avatarUrl, AVATAR_SIZE)
+      if (!avatar.ok) complete = false
+      const nameMaxWidth =
+        OG_WIDTH - 2 * OG_MARGIN - (avatar.buffer ? avatarOuter + NAME_GAP : 0)
+      const nameLayer = await renderName(name, nameMaxWidth)
+      row = authorRowLayers(avatar.buffer, avatarOuter, nameLayer)
     }
-    const boxHeight = PICTO_SIZE + 2 * BOX_PADDING
-    const top = Math.round((OG_HEIGHT - boxHeight) / 2)
-    const layers = pictogramsLayers(pictos, top)
+    const bottom =
+      row.top === null ? OG_HEIGHT - OG_MARGIN : row.top - PREVIEW_ROW_GAP
+    const layers = [
+      await previewLayer(capture, OG_MARGIN, bottom),
+      ...row.layers,
+    ]
     return { buffer: await toPng(background().composite(layers)), complete }
   }
 
-  const large = pictos.length === 0
-  const avatarSize = large ? AVATAR_LARGE_SIZE : AVATAR_SIZE
-  const avatarOuter = avatarSize + 2 * AVATAR_RING
-  const avatar = await buildAvatar(avatarUrl, avatarSize)
-  if (!avatar.ok) complete = false
-  const nameMaxWidth =
-    OG_WIDTH -
-    2 * OG_MARGIN -
-    (!large && avatar.buffer ? avatarOuter + NAME_GAP : 0)
-  const nameLayer = await renderName(name, nameMaxWidth)
+  if (!user) return { buffer: await getGenericImage(), complete: false }
 
-  if (large && !avatar.buffer && !nameLayer) {
+  const avatarOuter = AVATAR_LARGE_SIZE + 2 * AVATAR_RING
+  const avatar = await buildAvatar(avatarUrl, AVATAR_LARGE_SIZE)
+  if (!avatar.ok) complete = false
+  const nameLayer = await renderName(name, OG_WIDTH - 2 * OG_MARGIN)
+  if (!avatar.buffer && !nameLayer) {
     return { buffer: await getGenericImage(), complete: false }
   }
-  const layers = large
-    ? authorOnlyLayers(avatar.buffer, avatarOuter, nameLayer)
-    : pictogramsAndAuthorLayers(pictos, avatar.buffer, avatarOuter, nameLayer)
+  const layers = authorOnlyLayers(avatar.buffer, avatarOuter, nameLayer)
   return { buffer: await toPng(background().composite(layers)), complete }
 }
 
@@ -528,13 +802,11 @@ const ogImage = async (req, res) => {
   if (!ID_REGEX.test(id)) return res.status(404).json({ error: 'Not found' })
   try {
     // does not count visits nor touch lastAccessedAt
-    const share = await Share.findById(id, {
-      pictogramIds: 1,
-      ownerId: 1,
-    }).lean()
+    const share = await Share.findById(id, { ownerId: 1, preview: 1 }).lean()
     if (!share) return res.status(404).json({ error: 'Not found' })
     const user = await findUser(share.ownerId)
-    const file = ogCachePath(id, ogVersion(share, user))
+    const preview = await previewFile(share)
+    const file = ogCachePath(id, versionFor(user, preview))
 
     try {
       return sendPng(res, await fs.promises.readFile(file))
@@ -542,7 +814,7 @@ const ogImage = async (req, res) => {
       // not cached yet
     }
 
-    const { buffer, complete } = await buildShareImage(share, user)
+    const { buffer, complete } = await buildShareImage(share, user, preview)
     // do not cache incomplete images, so a transient failure can heal later
     if (complete) {
       try {
@@ -630,6 +902,8 @@ const mineItem = (s) => ({
   listed: listedValue(s),
   hidden: !!s.hidden,
   featured: !!s.featured,
+  preview: previewUrl(s),
+  imagesCount: (s.images || []).length,
 })
 
 const LIST_PROJECTION = {
@@ -644,7 +918,7 @@ const LIST_PROJECTION = {
 const create = async (req, res) => {
   logger.debug('EXEC create sharesController')
   const ownerId = req.user.id
-  const { data, generator, lang } = req.body || {}
+  const { data, generator, lang, images, preview } = req.body || {}
 
   if (!GENERATORS.includes(generator)) {
     return res.status(400).json({ error: 'Invalid generator' })
@@ -661,10 +935,22 @@ const create = async (req, res) => {
     return res.status(400).json({ error: 'Too many cells' })
   }
 
+  let assets
+  try {
+    assets = await prepareAssets(project, images, preview)
+  } catch (err) {
+    if (err instanceof AssetError) {
+      return res.status(400).json({ error: err.message })
+    }
+    logger.error(`Error checking share images: ${err.message}`)
+    return res.status(500).json({ error: 'Error creating share' })
+  }
+
   const title = cleanTitle(req.body.title)
   // the description is not part of the hash
   const description = cleanDescription(req.body.description)
   const cleanedLang = cleanLang(lang)
+  // with the photos' final names: the capture is not part of the hash
   const hash = crypto
     .createHash('sha256')
     .update(JSON.stringify(project) + title + cleanedLang + ownerId)
@@ -678,13 +964,24 @@ const create = async (req, res) => {
       editUrl: `${url}?edit`,
       listed: listedValue(share),
       description: share.description || '',
+      preview: previewUrl(share),
     })
   }
   const findExisting = () =>
     Share.findOne(
       { ownerId, hash },
-      { _id: 1, listed: 1, description: 1 },
+      { _id: 1, listed: 1, description: 1, preview: 1 },
     ).lean()
+
+  const files = [...assets.photos, ...(assets.preview ? [assets.preview] : [])]
+  // the stored project points to the files of this link
+  const dataFor = (id) => {
+    if (!assets.refs.length) return data
+    assets.refs.forEach((ref) => {
+      ref.src = assetUrl(id, ref.file)
+    })
+    return encodeProject(project)
+  }
 
   try {
     // an existing share is returned as is (nothing is modified)
@@ -698,24 +995,35 @@ const create = async (req, res) => {
     ])
     if (!allowed) return
 
-    const pictogramIds = extractPictogramIds(cells)
     for (let attempt = 0; attempt < 5; attempt++) {
       const id = newId()
+      if (files.length) {
+        // the folder of an existing link is never touched
+        if (await Share.exists({ _id: id })) continue
+        try {
+          await writeAssets(id, files)
+        } catch (err) {
+          if (err && err.code === 'EEXIST') continue
+          throw err
+        }
+      }
       try {
         const share = await Share.create({
           _id: id,
           ownerId,
           hash,
-          data,
+          data: dataFor(id),
           generator,
           lang: cleanedLang,
           title,
           description,
           searchText: buildSearchText(title, description),
-          pictogramIds,
+          preview: assets.preview ? assets.preview.name : null,
+          images: assets.photos.map((photo) => photo.name),
         })
         return respond(201, share)
       } catch (err) {
+        if (files.length) await removeAssets(id)
         if (err && err.code === 11000) {
           // duplicate: same content created concurrently, or id collision
           const same = await findExisting()
@@ -926,6 +1234,7 @@ const search = async (req, res) => {
         copies: s.copies || 0,
         featured: !!s.featured,
         author: authorFor(s.ownerId, users.get(String(s.ownerId))),
+        preview: previewUrl(s),
       })),
       author:
         isGiven(author) && users.has(author)
@@ -1067,6 +1376,8 @@ const GET_PROJECTION = {
   featured: 1,
   createdAt: 1,
   ownerId: 1,
+  preview: 1,
+  images: 1,
 }
 
 const get = async (req, res) => {
@@ -1103,6 +1414,8 @@ const get = async (req, res) => {
       featured: !!share.featured,
       createdAt,
       author: authorFor(ownerId, user),
+      preview: previewUrl(share),
+      images: imageUrls(share),
     })
   } catch (error) {
     logger.error(`Error getting share: ${error.message}`)
@@ -1122,6 +1435,7 @@ const remove = async (req, res) => {
     }
     await Share.deleteOne({ _id: id })
     await removeOgCache(id)
+    await removeAssets(id)
     if (share.ownerId !== req.user.id) {
       logger.info(`Share ${id} deleted by admin ${req.user.id}`)
     }
@@ -1143,9 +1457,9 @@ const page = async (req, res) => {
       ? await Share.findById(id, {
           title: 1,
           description: 1,
-          pictogramIds: 1,
           ownerId: 1,
           hidden: 1,
+          preview: 1,
         }).lean()
       : null
     if (!share) {
@@ -1170,7 +1484,7 @@ const page = async (req, res) => {
     const baseDescription = share.description || DEFAULT_DESCRIPTION
     const description = name ? `${name} · ${baseDescription}` : baseDescription
     // the version changes with the avatar or name, so crawlers fetch it again
-    const image = `${API_URL}/${id}/og.png?v=${ogVersion(share, user)}`
+    const image = `${API_URL}/${id}/og.png?v=${await ogVersion(share, user)}`
     const e = escapeHtml
     return res.status(200).send(`<!DOCTYPE html>
 <html lang="es">
@@ -1370,6 +1684,7 @@ const adminList = async (req, res) => {
         featuredAt: s.featuredAt || null,
         url: `${FRONT_URL}/${s._id}`,
         image: `${API_URL}/${s._id}/og.png`,
+        images: imageUrls(s),
         author: adminPerson(s.ownerId, users.get(String(s.ownerId))),
         reportsCount: s.reportsCount || 0,
         reports: (s.reports || []).map((r) => adminReport(r, users)),
@@ -1408,6 +1723,7 @@ module.exports = {
   ogImage,
   ogVersion,
   cleanOgCache,
+  cleanShareAssets,
   buildGenericImage,
   buildShareImage,
   isSafeAvatarUrl,

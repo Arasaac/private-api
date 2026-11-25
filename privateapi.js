@@ -55,10 +55,17 @@ app.set('etag', false)
 // parse application/x-www-form-urlencoded
 app.use(bodyParser.urlencoded({ extended: false }))
 
-// shares: small body limit (must be before the global json parser)
-app.use(
-  '/api/shares',
-  bodyParser.json({ limit: '200kb', type: 'application/json' }),
+// shares: small body limit (must be before the global json parser), except
+// creating a link, which carries the activity capture and the author's photos
+const sharesJson = bodyParser.json({ limit: '200kb', type: 'application/json' })
+const sharesCreateJson = bodyParser.json({
+  limit: '12mb',
+  type: 'application/json',
+})
+app.use('/api/shares', (req, res, next) =>
+  req.method === 'POST' && (req.path === '/' || req.path === '')
+    ? sharesCreateJson(req, res, next)
+    : sharesJson(req, res, next),
 )
 
 app.use(bodyParser.json({ limit: '50mb', type: 'application/json' }))
