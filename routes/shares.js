@@ -17,6 +17,19 @@ router.get('/mine', auth, (req, res) => {
   sharesController.mine(req, res)
 })
 
+// public: listed links (must be before '/:id')
+router.get('/search', (req, res) => {
+  sharesController.search(req, res)
+})
+
+router.post('/:id/copy', auth, (req, res) => {
+  sharesController.copy(req, res)
+})
+
+router.post('/:id/report', auth, (req, res) => {
+  sharesController.report(req, res)
+})
+
 router.get('/:id/page', (req, res) => {
   sharesController.page(req, res)
 })
@@ -27,6 +40,10 @@ router.get('/:id/og.png', (req, res) => {
 
 router.get('/:id', (req, res) => {
   sharesController.get(req, res)
+})
+
+router.patch('/:id', auth, (req, res) => {
+  sharesController.update(req, res)
 })
 
 router.delete('/:id', auth, (req, res) => {
