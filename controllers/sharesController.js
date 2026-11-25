@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit')
 const Share = require('../models/Share')
 const User = require('../models/User')
 const logger = require('../utils/logger')
+const { postToMattermost } = require('../utils/mattermost')
 const {
   normalizeText,
   escapeRegex,
@@ -78,6 +79,13 @@ const cleanLang = (lang) =>
 
 const listedValue = (share) =>
   share.listed === undefined || share.listed === null ? null : share.listed
+
+// a hidden share is only available to its owner and to admins
+const canSeeHidden = (user, share) =>
+  !!user && (user.role === 'admin' || String(user.id) === share.ownerId)
+
+const isBlocked = (user, share) =>
+  share.hidden === true && !canSeeHidden(user, share)
 
 const decodeProject = (data) => {
   if (typeof data !== 'string' || !/^[A-Za-z0-9_-]+$/.test(data)) return null
@@ -621,6 +629,7 @@ const mineItem = (s) => ({
   copies: s.copies || 0,
   listed: listedValue(s),
   hidden: !!s.hidden,
+  featured: !!s.featured,
 })
 
 const LIST_PROJECTION = {
@@ -739,12 +748,14 @@ const mine = async (req, res) => {
 const update = async (req, res) => {
   const { id } = req.params
   if (!ID_REGEX.test(id)) return res.status(404).json({ error: 'Not found' })
-  const { listed, description, hidden, dismissReports } = req.body || {}
+  const { listed, description, hidden, dismissReports, featured } =
+    req.body || {}
   if (
     (listed !== undefined && typeof listed !== 'boolean') ||
     (description !== undefined && typeof description !== 'string') ||
     (hidden !== undefined && typeof hidden !== 'boolean') ||
-    (dismissReports !== undefined && typeof dismissReports !== 'boolean')
+    (dismissReports !== undefined && typeof dismissReports !== 'boolean') ||
+    (featured !== undefined && typeof featured !== 'boolean')
   ) {
     return res.status(400).json({ error: 'Invalid fields' })
   }
@@ -756,15 +767,17 @@ const update = async (req, res) => {
       description: 1,
       searchText: 1,
       hidden: 1,
+      featured: 1,
       reports: 1,
     }).lean()
     if (!share) return res.status(404).json({ error: 'Not found' })
     const isAdmin = req.user.role === 'admin'
     const isOwner = share.ownerId === req.user.id
-    if (
-      (!isOwner && !isAdmin) ||
-      ((hidden !== undefined || dismissReports !== undefined) && !isAdmin)
-    ) {
+    const adminOnly =
+      hidden !== undefined ||
+      dismissReports !== undefined ||
+      featured !== undefined
+    if ((!isOwner && !isAdmin) || (adminOnly && !isAdmin)) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
@@ -779,6 +792,18 @@ const update = async (req, res) => {
     } else if (listed === true && !share.searchText) {
       // Links created before the search existed have no searchText yet
       $set.searchText = buildSearchText(share.title, share.description || '')
+    }
+    if (featured !== undefined) {
+      $set.featured = featured
+      // featuredAt/featuredBy keep the first time it was featured; unfeaturing
+      // keeps them as history
+      if (featured && share.featured !== true) {
+        $set.featuredAt = new Date()
+        $set.featuredBy = String(req.user.id)
+      }
+      logger.info(
+        `Share ${id} ${featured ? 'featured' : 'unfeatured'} by admin ${req.user.id}`,
+      )
     }
     const update = {}
     if (hidden !== undefined || dismissReports === true) {
@@ -821,6 +846,14 @@ const parsePositiveInt = (value, fallback) => {
 
 const isGiven = (value) => value !== undefined && value !== ''
 
+// true: only featured, false: no filter, null: invalid
+const parseFeatured = (value) => {
+  if (value === undefined || value === '' || value === '0' || value === 'false')
+    return false
+  if (value === '1' || value === 'true') return true
+  return null
+}
+
 const search = async (req, res) => {
   const query = req.query || {}
   const { generator, author } = query
@@ -841,6 +874,10 @@ const search = async (req, res) => {
   if (!SORTS.includes(sort)) {
     return res.status(400).json({ error: 'Invalid sort' })
   }
+  const featuredOnly = parseFeatured(query.featured)
+  if (featuredOnly === null) {
+    return res.status(400).json({ error: 'Invalid featured' })
+  }
   const page = parsePositiveInt(query.page, 1)
   if (!Number.isInteger(page) || page < 1) {
     return res.status(400).json({ error: 'Invalid page' })
@@ -853,6 +890,7 @@ const search = async (req, res) => {
   const filter = { listed: true, hidden: { $ne: true } }
   if (isGiven(generator)) filter.generator = generator
   if (isGiven(author)) filter.ownerId = author
+  if (featuredOnly) filter.featured = true
   const tokens = tokenize(normalizeText(q))
   if (tokens.length) {
     filter.$and = tokens.map((token) => ({
@@ -861,8 +899,9 @@ const search = async (req, res) => {
   }
 
   try {
+    // featured first, so they are never cut by the candidates limit
     const candidates = await Share.find(filter, LIST_PROJECTION)
-      .sort({ createdAt: -1 })
+      .sort({ featured: -1, createdAt: -1 })
       .limit(MAX_SEARCH_CANDIDATES)
       .lean()
     const ranked = rankShares(candidates, { q, sort, now: Date.now() })
@@ -885,6 +924,7 @@ const search = async (req, res) => {
         createdAt: s.createdAt,
         visits: s.visits || 0,
         copies: s.copies || 0,
+        featured: !!s.featured,
         author: authorFor(s.ownerId, users.get(String(s.ownerId))),
       })),
       author:
@@ -903,8 +943,11 @@ const copy = async (req, res) => {
   const { id } = req.params
   if (!ID_REGEX.test(id)) return res.status(404).json({ error: 'Not found' })
   try {
-    const share = await Share.findById(id, { ownerId: 1 }).lean()
+    const share = await Share.findById(id, { ownerId: 1, hidden: 1 }).lean()
     if (!share) return res.status(404).json({ error: 'Not found' })
+    if (isBlocked(req.user, share)) {
+      return res.status(410).json({ error: 'Hidden' })
+    }
     // the author saving their own link does not count
     if (share.ownerId !== req.user.id) {
       await Share.updateOne({ _id: id }, { $inc: { copies: 1 } })
@@ -916,6 +959,57 @@ const copy = async (req, res) => {
   }
 }
 
+// ---- Mattermost notices for moderators ----
+
+const adminUrl = () =>
+  (process.env.ARASAAC_ADMIN_URL || 'https://admin.arasaac.org').replace(
+    /\/+$/,
+    '',
+  )
+
+// user text in a notice: no @channel/@user mentions
+const noticeText = (value) => String(value || '').replace(/@/g, '@​')
+
+const noticeLinks = (id) =>
+  `${FRONT_URL}/${id}?edit · Revisar: ${adminUrl()}/shared-activities`
+
+const reasonLine = (report) =>
+  `> ${noticeText(report.reason) || '(sin motivo)'}`
+
+const buildReportNotice = (share, user, { hiddenNow, reason }) => {
+  const title = noticeText(share.title) || 'Sin título'
+  const name = noticeText(user && user.name) || 'autor desconocido'
+  const reports = share.reports || []
+  if (hiddenNow) {
+    return (
+      `⛔ Actividad ocultada automáticamente tras ${reports.length} denuncias: **${title}** de ${name}\n` +
+      `${reports.map(reasonLine).join('\n')}\n${noticeLinks(share._id)}`
+    )
+  }
+  return (
+    `🚩 Nueva denuncia en ARActivities: **${title}** de ${name}\n` +
+    `${reasonLine({ reason })}\n${noticeLinks(share._id)}`
+  )
+}
+
+// pending notices, so tests can wait for them (flushNotices)
+const pendingNotices = new Set()
+
+const notifyReport = (share, options) => {
+  const promise = (async () => {
+    const user = await findUser(share.ownerId)
+    await postToMattermost(buildReportNotice(share, user, options))
+  })()
+    .catch((err) => {
+      logger.warn(`Could not notify the report of ${share._id}: ${err.message}`)
+    })
+    .finally(() => pendingNotices.delete(promise))
+  pendingNotices.add(promise)
+  return promise
+}
+
+const flushNotices = () => Promise.all([...pendingNotices])
+
 const report = async (req, res) => {
   const { id } = req.params
   if (!ID_REGEX.test(id)) return res.status(404).json({ error: 'Not found' })
@@ -926,7 +1020,10 @@ const report = async (req, res) => {
     const updated = await Share.findOneAndUpdate(
       { _id: id, 'reports.userId': { $ne: userId } },
       { $push: { reports: { userId, reason, at: new Date() } } },
-      { new: true, projection: { reports: 1, hidden: 1 } },
+      {
+        new: true,
+        projection: { reports: 1, hidden: 1, title: 1, ownerId: 1 },
+      },
     ).lean()
     if (!updated) {
       const exists = await Share.exists({ _id: id })
@@ -937,14 +1034,20 @@ const report = async (req, res) => {
       Number(process.env.SHARES_REPORT_HIDE_THRESHOLD) ||
       DEFAULT_REPORT_HIDE_THRESHOLD
     const count = (updated.reports || []).length
+    let hiddenNow = false
     if (count >= threshold && !updated.hidden) {
       const result = await Share.updateOne(
         { _id: id, hidden: { $ne: true } },
         { $set: { hidden: true } },
       )
       if (result.nModified || result.modifiedCount) {
+        hiddenNow = true
         logger.warn(`Share ${id} hidden after ${count} reports`)
       }
+    }
+    // fire and forget: the notice never delays nor breaks the response
+    if (hiddenNow || (count === 1 && !updated.hidden)) {
+      notifyReport(updated, { hiddenNow, reason })
     }
     return res.status(204).end()
   } catch (error) {
@@ -953,16 +1056,40 @@ const report = async (req, res) => {
   }
 }
 
+const GET_PROJECTION = {
+  data: 1,
+  generator: 1,
+  lang: 1,
+  title: 1,
+  description: 1,
+  listed: 1,
+  hidden: 1,
+  featured: 1,
+  createdAt: 1,
+  ownerId: 1,
+}
+
 const get = async (req, res) => {
   const { id } = req.params
   if (!ID_REGEX.test(id)) return res.status(404).json({ error: 'Not found' })
-  try {
-    const share = await Share.findOneAndUpdate(
-      { _id: id },
+  const visit = (filter) =>
+    Share.findOneAndUpdate(
+      filter,
       { $inc: { visits: 1 }, $set: { lastAccessedAt: new Date() } },
-      { new: true, projection: { reports: 0, searchText: 0, hash: 0 } },
+      { new: true, projection: GET_PROJECTION },
     ).lean()
-    if (!share) return res.status(404).json({ error: 'Not found' })
+  try {
+    // hidden shares are not counted here: they need the owner or an admin
+    let share = await visit({ _id: id, hidden: { $ne: true } })
+    if (!share) {
+      const hidden = await Share.findById(id, { ownerId: 1, hidden: 1 }).lean()
+      if (!hidden) return res.status(404).json({ error: 'Not found' })
+      if (isBlocked(req.user, hidden)) {
+        return res.status(410).json({ error: 'Hidden' })
+      }
+      share = await visit({ _id: id })
+      if (!share) return res.status(404).json({ error: 'Not found' })
+    }
     const { data, generator, lang, title, createdAt, ownerId } = share
     const user = await findUser(ownerId)
     return res.status(200).json({
@@ -972,6 +1099,8 @@ const get = async (req, res) => {
       title,
       description: share.description || '',
       listed: listedValue(share),
+      hidden: !!share.hidden,
+      featured: !!share.featured,
       createdAt,
       author: authorFor(ownerId, user),
     })
@@ -1016,6 +1145,7 @@ const page = async (req, res) => {
           description: 1,
           pictogramIds: 1,
           ownerId: 1,
+          hidden: 1,
         }).lean()
       : null
     if (!share) {
@@ -1023,6 +1153,14 @@ const page = async (req, res) => {
         .status(404)
         .send(
           '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>No encontrado</title></head><body><p>Esta actividad no existe o ha caducado.</p></body></html>',
+        )
+    }
+    // nothing of the activity while it is under review
+    if (share.hidden === true) {
+      return res
+        .status(410)
+        .send(
+          '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>ARActivities</title></head><body><p>Esta actividad se ha retirado mientras se revisa.</p></body></html>',
         )
     }
     const user = await findUser(share.ownerId)
@@ -1059,7 +1197,14 @@ const page = async (req, res) => {
 
 // ---- administration ----
 
-const ADMIN_STATUSES = ['all', 'reported', 'hidden', 'listed', 'unlisted']
+const ADMIN_STATUSES = [
+  'all',
+  'reported',
+  'hidden',
+  'listed',
+  'unlisted',
+  'featured',
+]
 const ADMIN_SORTS = ['recent', 'reports', 'visits', 'copies']
 const ADMIN_MAX_LIMIT = 100
 const ADMIN_DEFAULT_LIMIT = 25
@@ -1080,6 +1225,8 @@ const statusFilter = (status) => {
       return { listed: true, hidden: { $ne: true } }
     case 'unlisted':
       return { listed: { $ne: true } }
+    case 'featured':
+      return { featured: true }
     default:
       return {}
   }
@@ -1191,8 +1338,8 @@ const adminList = async (req, res) => {
     const total = (result && result.total[0] && result.total[0].n) || 0
 
     // tab counters, with the same text/type/author filters
-    const [all, reported, hidden, listed] = await Promise.all(
-      ['all', 'reported', 'hidden', 'listed'].map((s) =>
+    const [all, reported, hidden, listed, featured] = await Promise.all(
+      ['all', 'reported', 'hidden', 'listed', 'featured'].map((s) =>
         Share.countDocuments({ $and: [base, text, statusFilter(s)] }),
       ),
     )
@@ -1217,9 +1364,10 @@ const adminList = async (req, res) => {
       total,
       page,
       limit,
-      counts: { all, reported, hidden, listed },
+      counts: { all, reported, hidden, listed, featured },
       items: shares.map((s) => ({
         ...mineItem(s),
+        featuredAt: s.featuredAt || null,
         url: `${FRONT_URL}/${s._id}`,
         image: `${API_URL}/${s._id}/og.png`,
         author: adminPerson(s.ownerId, users.get(String(s.ownerId))),
@@ -1253,6 +1401,7 @@ module.exports = {
   search,
   copy,
   report,
+  flushNotices,
   get,
   remove,
   page,

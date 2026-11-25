@@ -3,6 +3,8 @@
 const MAX_TOKENS = 8
 const DAY_MS = 24 * 60 * 60 * 1000
 const FRESHNESS_DAYS = 60
+// with q, featured links get a small boost (an exact title still wins)
+const FEATURED_BOOST = 4
 
 // lowercase, without diacritics ("Pájaros" -> "pajaros"), collapsed spaces
 const normalizeText = (value) =>
@@ -61,18 +63,27 @@ const textScore = (share, normalizedQuery, tokens) => {
   return score
 }
 
+const isFeatured = (share) => share.featured === true
+
+// Without q, featured is not part of the score: rankShares puts them first
 const scoreShare = (share, { q, now = Date.now() } = {}) => {
   const normalizedQuery = normalizeText(q)
   const base = popularity(share) + 3 * freshness(share, now)
   if (!normalizedQuery) return base
-  return base + textScore(share, normalizedQuery, tokenize(normalizedQuery))
+  return (
+    base +
+    textScore(share, normalizedQuery, tokenize(normalizedQuery)) +
+    (isFeatured(share) ? FEATURED_BOOST : 0)
+  )
 }
 
 const byNewest = (a, b) => createdTime(b) - createdTime(a)
 const byId = (a, b) =>
   String(a._id || a.id).localeCompare(String(b._id || b.id))
 
-// Returns a new array sorted for sort = relevance | popular | recent
+// Returns a new array sorted for sort = relevance | popular | recent.
+// relevance without q: featured first, then by score. popular and recent
+// ignore featured.
 const rankShares = (
   shares,
   { q, sort = 'relevance', now = Date.now() } = {},
@@ -90,13 +101,21 @@ const rankShares = (
     )
   }
   const scores = new Map(list.map((s) => [s, scoreShare(s, { q, now })]))
+  const featuredFirst = normalizeText(q)
+    ? () => 0
+    : (a, b) => Number(isFeatured(b)) - Number(isFeatured(a))
   return list.sort(
-    (a, b) => scores.get(b) - scores.get(a) || byNewest(a, b) || byId(a, b),
+    (a, b) =>
+      featuredFirst(a, b) ||
+      scores.get(b) - scores.get(a) ||
+      byNewest(a, b) ||
+      byId(a, b),
   )
 }
 
 module.exports = {
   MAX_TOKENS,
+  FEATURED_BOOST,
   normalizeText,
   buildSearchText,
   tokenize,

@@ -5,6 +5,7 @@ const {
   prefixPattern,
   scoreShare,
   rankShares,
+  FEATURED_BOOST,
 } = require('../../utils/sharesSearch')
 
 const NOW = Date.UTC(2026, 0, 31)
@@ -142,6 +143,69 @@ describe('rankShares', () => {
     const b = share({ listedAt: undefined, createdAt: new Date(NOW - 2 * DAY) })
     const c = share({ listedAt: new Date(NOW - DAY) })
     expect(order([a, b, c], { sort: 'recent' })).toEqual([c._id, b._id, a._id])
+  })
+
+  it('relevance without q: featured first, then the usual score', () => {
+    const popular = share({ visits: 9999, listedAt: new Date(NOW) })
+    const featuredOld = share({
+      featured: true,
+      listedAt: new Date(NOW - 365 * DAY),
+    })
+    const featuredFresh = share({ featured: true, listedAt: new Date(NOW) })
+    const quiet = share({ listedAt: new Date(NOW - 365 * DAY) })
+    expect(order([quiet, popular, featuredOld, featuredFresh], {})).toEqual([
+      featuredFresh._id,
+      featuredOld._id,
+      popular._id,
+      quiet._id,
+    ])
+    // without q featured does not change the score itself
+    expect(scoreShare(featuredFresh, { now: NOW })).toBeCloseTo(
+      scoreShare(share({ listedAt: new Date(NOW) }), { now: NOW }),
+    )
+  })
+
+  it('relevance with q: featured adds a small boost, an exact title still wins', () => {
+    const exact = share({ title: 'Gatos' })
+    const featuredPartial = share({ title: 'Gatos y perros', featured: true })
+    const partial = share({ title: 'Gatos y perros' })
+    expect(order([partial, featuredPartial, exact], { q: 'gatos' })).toEqual([
+      exact._id,
+      featuredPartial._id,
+      partial._id,
+    ])
+    const a = scoreShare(featuredPartial, { q: 'gatos', now: NOW })
+    const b = scoreShare(partial, { q: 'gatos', now: NOW })
+    expect(a - b).toBeCloseTo(FEATURED_BOOST)
+    expect(FEATURED_BOOST).toBe(4)
+    // the boost is small: a title match beats a featured description match
+    const inDescription = share({
+      title: 'Animales',
+      description: 'perros',
+      featured: true,
+    })
+    const inTitle = share({ title: 'Los perros' })
+    expect(order([inDescription, inTitle], { q: 'perr' })).toEqual([
+      inTitle._id,
+      inDescription._id,
+    ])
+  })
+
+  it('popular and recent ignore featured', () => {
+    const featured = share({
+      featured: true,
+      visits: 1,
+      listedAt: new Date(NOW - 5 * DAY),
+    })
+    const other = share({ visits: 10, listedAt: new Date(NOW - DAY) })
+    expect(order([featured, other], { sort: 'popular' })).toEqual([
+      other._id,
+      featured._id,
+    ])
+    expect(order([featured, other], { sort: 'recent' })).toEqual([
+      other._id,
+      featured._id,
+    ])
   })
 
   it('does not modify the input array', () => {

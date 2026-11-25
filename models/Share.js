@@ -23,6 +23,10 @@ const ShareSchema = new Schema(
     listedAt: { type: Date },
     // times someone saved a copy in their activities
     copies: { type: Number, default: 0 },
+    // chosen by admins: shown first in search
+    featured: { type: Boolean, default: false },
+    featuredAt: { type: Date },
+    featuredBy: { type: String },
     // moderation
     hidden: { type: Boolean, default: false },
     reports: {
@@ -64,6 +68,7 @@ ShareSchema.index({ ownerId: 1, hash: 1 }, { unique: true })
 ShareSchema.index({ ownerId: 1, createdAt: -1 })
 ShareSchema.index({ listed: 1, hidden: 1, generator: 1 })
 ShareSchema.index({ listed: 1, ownerId: 1 })
+ShareSchema.index({ listed: 1, hidden: 1, featured: 1 })
 ShareSchema.index({ hidden: 1, createdAt: -1 })
 ShareSchema.index(
   { lastAccessedAt: 1 },

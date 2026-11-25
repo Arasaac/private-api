@@ -10,9 +10,14 @@ const db = require('../../db')
 const { seedDatabase } = require('../seed')
 const Share = require('../../models/Share')
 const User = require('../../models/User')
-const { ogVersion } = require('../../controllers/sharesController')
+const {
+  ogVersion,
+  flushNotices,
+} = require('../../controllers/sharesController')
 let app
+let server
 let axiosSpy
+let postSpy
 let testPicto
 let cacheDir
 
@@ -72,7 +77,10 @@ beforeAll(async () => {
   await db.open()
   await seedDatabase()
   await Share.init()
-  app = require('../../privateapi')
+  // one server for the whole file: an ephemeral server per request makes
+  // supertest flaky (socket hang up, answers from the wrong server)
+  server = require('../../privateapi').listen(0)
+  app = server
   cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shares-og-test-'))
   process.env.SHARES_OG_CACHE_DIR = cacheDir
   testPicto = await sharp({
@@ -81,10 +89,13 @@ beforeAll(async () => {
     .png()
     .toBuffer()
   axiosSpy = jest.spyOn(axios, 'get')
+  postSpy = jest.spyOn(axios, 'post')
 })
 
 afterAll(async () => {
   axiosSpy.mockRestore()
+  postSpy.mockRestore()
+  await new Promise((resolve) => server.close(resolve))
   fs.rmSync(cacheDir, { recursive: true, force: true })
   await db.close()
 })
@@ -98,6 +109,13 @@ beforeEach(async () => {
     if (String(url).includes('static.arasaac.org')) return { data: testPicto }
     return { data: {} }
   })
+  postSpy.mockReset()
+  postSpy.mockResolvedValue({ data: {} })
+})
+
+// Mattermost notices are fire and forget: let them end inside their test
+afterEach(async () => {
+  await flushNotices()
 })
 
 describe('Shares API', () => {
@@ -236,6 +254,7 @@ describe('Shares API', () => {
         copies: 0,
         listed: null,
         hidden: false,
+        featured: false,
       })
       expect(res.body[0]).not.toHaveProperty('data')
     })
@@ -256,6 +275,8 @@ describe('Shares API', () => {
         title: 'Mi actividad',
         description: '',
         listed: null,
+        hidden: false,
+        featured: false,
         createdAt: expect.any(String),
         author: {
           id: USER_A_ID,
@@ -588,6 +609,7 @@ describe('Shares API: listing, search and moderation', () => {
         reported: 1,
         hidden: 1,
         listed: 1,
+        featured: 0,
       })
       const item = res.body.items.find((i) => i.id === reported)
       const userADoc = await User.findById(USER_A_ID).lean()
@@ -639,6 +661,7 @@ describe('Shares API: listing, search and moderation', () => {
         reported: 1,
         hidden: 0,
         listed: 1,
+        featured: 0,
       })
     })
 
@@ -745,8 +768,15 @@ describe('Shares API: listing, search and moderation', () => {
       expect(mine.body[0]).not.toHaveProperty('moderation')
       expect(mine.body[0]).not.toHaveProperty('dismissedReports')
       const pub = await request(app).get(`/api/shares/${id}`)
-      expect(pub.body).not.toHaveProperty('moderation')
-      expect(pub.body).not.toHaveProperty('dismissedReports')
+      expect(pub.status).toBe(410)
+      expect(pub.body).toEqual({ error: 'Hidden' })
+      const own = await request(app)
+        .get(`/api/shares/${id}`)
+        .set('Authorization', `Bearer ${userA}`)
+      expect(own.status).toBe(200)
+      expect(own.body).not.toHaveProperty('moderation')
+      expect(own.body).not.toHaveProperty('dismissedReports')
+      expect(own.body).not.toHaveProperty('reports')
     })
   })
 
@@ -829,6 +859,7 @@ describe('Shares API: listing, search and moderation', () => {
         copies: 0,
         listed: true,
         hidden: false,
+        featured: false,
       })
       const doc = await Share.findById(id).lean()
       expect(doc.listedAt.getTime()).toBeGreaterThanOrEqual(before - 1000)
@@ -947,6 +978,7 @@ describe('Shares API: listing, search and moderation', () => {
         createdAt: expect.any(String),
         visits: 0,
         copies: 0,
+        featured: false,
         author: {
           id: USER_A_ID,
           name: 'Normal User',
@@ -1314,6 +1346,385 @@ describe('Shares API: listing, search and moderation', () => {
     })
   })
 
+  describe('hidden links stop opening', () => {
+    const get = (id, token) => {
+      const req = request(app).get(`/api/shares/${id}`)
+      return token ? req.set('Authorization', `Bearer ${token}`) : req
+    }
+
+    it('GET: 410 for the public and other users, without counting a visit', async () => {
+      const old = new Date(Date.now() - 3600 * 1000)
+      const id = await listed(
+        userA,
+        {},
+        { hidden: true, lastAccessedAt: old, visits: 7 },
+      )
+      for (const token of [undefined, userB, 'not-a-jwt']) {
+        const res = await get(id, token)
+        expect([token, res.status]).toEqual([token, 410])
+        expect(res.body).toEqual({ error: 'Hidden' })
+      }
+      const doc = await Share.findById(id).lean()
+      expect(doc.visits).toBe(7)
+      expect(doc.lastAccessedAt.getTime()).toBe(old.getTime())
+    })
+
+    it('GET: the owner and admins still open it (hidden: true)', async () => {
+      const id = await listed(userA, {}, { hidden: true })
+      for (const token of [userA, admin]) {
+        const res = await get(id, token)
+        expect(res.status).toBe(200)
+        expect(res.body).toMatchObject({
+          hidden: true,
+          featured: false,
+          title: expect.any(String),
+          author: { id: USER_A_ID },
+        })
+        expect(res.body.data).toEqual(expect.any(String))
+      }
+      expect((await Share.findById(id).lean()).visits).toBe(2)
+    })
+
+    it('GET: optional auth never answers 401', async () => {
+      const id = await listed(userA)
+      const hiddenId = await make(userA, {}, { hidden: true })
+      expect((await get(id, 'not-a-jwt')).status).toBe(200)
+      expect((await get(id, userB)).status).toBe(200)
+      // the auth server is down: anonymous
+      axiosSpy.mockImplementation(async (url) => {
+        if (String(url).includes('tokeninfo')) throw new Error('ECONNREFUSED')
+        return { data: {} }
+      })
+      expect((await get(id, userB)).status).toBe(200)
+      // the owner with an unverifiable token is anonymous: 410, not 401/500
+      expect((await get(hiddenId, userA)).status).toBe(410)
+      expect((await Share.findById(id).lean()).visits).toBe(3)
+    })
+
+    it('copy: 410 for other users, allowed for the owner and admins', async () => {
+      const id = await listed(userA, {}, { hidden: true })
+      const copy = (token) =>
+        request(app)
+          .post(`/api/shares/${id}/copy`)
+          .set('Authorization', `Bearer ${token}`)
+      const res = await copy(userB)
+      expect(res.status).toBe(410)
+      expect(res.body).toEqual({ error: 'Hidden' })
+      expect((await Share.findById(id).lean()).copies).toBe(0)
+      expect((await copy(userA)).status).toBe(204)
+      expect((await copy(admin)).status).toBe(204)
+      expect((await Share.findById(id).lean()).copies).toBe(1)
+    })
+
+    it('page: 410 noindex html without the activity data; og.png unchanged', async () => {
+      const id = await listed(
+        userA,
+        { title: 'Secreto', description: 'Datos privados' },
+        { hidden: true },
+      )
+      const res = await request(app).get(`/api/shares/${id}/page`)
+      expect(res.status).toBe(410)
+      expect(res.headers['content-type']).toMatch(/text\/html/)
+      expect(res.text).toContain(
+        '<meta name="robots" content="noindex, nofollow">',
+      )
+      expect(res.text).toContain(
+        'Esta actividad se ha retirado mientras se revisa.',
+      )
+      expect(res.text).not.toContain('og:title')
+      expect(res.text).not.toContain('og:description')
+      expect(res.text).not.toContain('Secreto')
+      expect(res.text).not.toContain('Datos privados')
+      expect(res.text).not.toContain('Normal User')
+      const png = await request(app).get(`/api/shares/${id}/og.png`)
+      expect(png.status).toBe(200)
+      expect(png.headers['content-type']).toBe('image/png')
+    })
+  })
+
+  describe('Mattermost notices on reports', () => {
+    const report = (token, id, reason) =>
+      request(app)
+        .post(`/api/shares/${id}/report`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(reason === undefined ? {} : { reason })
+    const messages = () => postSpy.mock.calls.map(([, body]) => body.message)
+    const links = (id) =>
+      `https://aractivities.arasaac.org/s/${id}?edit · Revisar: https://admin.arasaac.org/shared-activities`
+    const saved = {}
+
+    beforeEach(() => {
+      ;[
+        'MATTERMOST_URL',
+        'MATTERMOST_TOKEN',
+        'MATTERMOST_CHANNEL_ID',
+        'MATTERMOST_CHANNEL_ID_ARACTIVITIES',
+        'ARASAAC_ADMIN_URL',
+      ].forEach((key) => {
+        saved[key] = process.env[key]
+      })
+    })
+
+    afterEach(() => {
+      Object.entries(saved).forEach(([key, value]) => {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      })
+    })
+
+    it('posts a notice on the first pending report only', async () => {
+      const id = await listed(userA, { title: 'Bingo granja' })
+      expect((await report(userB, id, 'Datos de alumnos')).status).toBe(204)
+      await flushNotices()
+      expect(postSpy).toHaveBeenCalledTimes(1)
+      const [url, body, config] = postSpy.mock.calls[0]
+      expect(url).toBe('http://localhost/api/v4/posts')
+      expect(body).toEqual({
+        channel_id: 'test-channel',
+        message: `🚩 Nueva denuncia en ARActivities: **Bingo granja** de Normal User\n> Datos de alumnos\n${links(id)}`,
+      })
+      expect(config).toMatchObject({
+        headers: { Authorization: 'Bearer test-token' },
+        timeout: 5000,
+      })
+      // second report below the threshold: no notice
+      expect((await report(userC, id, 'otra')).status).toBe(204)
+      await flushNotices()
+      expect(postSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('fallbacks for title, author and reason; ARActivities channel and admin url', async () => {
+      process.env.MATTERMOST_CHANNEL_ID_ARACTIVITIES = 'aractivities-channel'
+      process.env.ARASAAC_ADMIN_URL = 'https://admin.test.org/'
+      // userB has no User document
+      const id = await listed(userB, { title: '' })
+      await report(userC, id)
+      await flushNotices()
+      expect(postSpy.mock.calls[0][1]).toEqual({
+        channel_id: 'aractivities-channel',
+        message: `🚩 Nueva denuncia en ARActivities: **Sin título** de autor desconocido\n> (sin motivo)\nhttps://aractivities.arasaac.org/s/${id}?edit · Revisar: https://admin.test.org/shared-activities`,
+      })
+    })
+
+    it('posts the auto-hide notice with every pending reason', async () => {
+      process.env.SHARES_REPORT_HIDE_THRESHOLD = '3'
+      const id = await listed(userA, { title: 'Colores' })
+      await report(userB, id, 'spam')
+      await report(userC, id, '')
+      await flushNotices()
+      expect(postSpy).toHaveBeenCalledTimes(1)
+      await report(userD, id, 'datos personales')
+      await flushNotices()
+      expect((await Share.findById(id).lean()).hidden).toBe(true)
+      expect(postSpy).toHaveBeenCalledTimes(2)
+      expect(messages()[1]).toBe(
+        `⛔ Actividad ocultada automáticamente tras 3 denuncias: **Colores** de Normal User\n> spam\n> (sin motivo)\n> datos personales\n${links(id)}`,
+      )
+      // more reports on a hidden link: no more notices
+      await report(admin, id, 'más')
+      await flushNotices()
+      expect(postSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it('a first report on an already hidden link does not notify', async () => {
+      const id = await listed(userA, {}, { hidden: true })
+      expect((await report(userB, id, 'x')).status).toBe(204)
+      await flushNotices()
+      expect(postSpy).not.toHaveBeenCalled()
+    })
+
+    it('mentions in user text are neutralized', async () => {
+      const id = await listed(userA, { title: '@all hola' })
+      await report(userB, id, '@channel urgente')
+      await flushNotices()
+      const message = messages()[0]
+      expect(message).toContain('**@​all hola**')
+      expect(message).toContain('> @​channel urgente')
+      expect(message).not.toMatch(/@(channel|all)/)
+    })
+
+    it('does nothing when Mattermost is not configured', async () => {
+      const id = await listed(userA)
+      delete process.env.MATTERMOST_URL
+      expect((await report(userB, id, 'x')).status).toBe(204)
+      process.env.MATTERMOST_URL = saved.MATTERMOST_URL
+      delete process.env.MATTERMOST_TOKEN
+      const id2 = await listed(userA)
+      expect((await report(userB, id2, 'x')).status).toBe(204)
+      process.env.MATTERMOST_TOKEN = saved.MATTERMOST_TOKEN
+      delete process.env.MATTERMOST_CHANNEL_ID
+      delete process.env.MATTERMOST_CHANNEL_ID_ARACTIVITIES
+      const id3 = await listed(userA)
+      expect((await report(userB, id3, 'x')).status).toBe(204)
+      await flushNotices()
+      expect(postSpy).not.toHaveBeenCalled()
+      expect((await Share.findById(id3).lean()).reports).toHaveLength(1)
+    })
+
+    it('a failing Mattermost never breaks the response', async () => {
+      postSpy.mockRejectedValue(new Error('Mattermost down'))
+      process.env.SHARES_REPORT_HIDE_THRESHOLD = '1'
+      const id = await listed(userA)
+      expect((await report(userB, id, 'x')).status).toBe(204)
+      await expect(flushNotices()).resolves.toBeDefined()
+      expect(postSpy).toHaveBeenCalledTimes(1)
+      const doc = await Share.findById(id).lean()
+      expect(doc.reports).toHaveLength(1)
+      expect(doc.hidden).toBe(true)
+      // threshold 1: only the auto-hide notice
+      expect(postSpy.mock.calls[0][1].message).toMatch(
+        /^⛔ Actividad ocultada automáticamente tras 1 denuncias/,
+      )
+    })
+
+    it('a slow Mattermost does not delay the response', async () => {
+      let release
+      postSpy.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          }),
+      )
+      const id = await listed(userA)
+      expect((await report(userB, id, 'x')).status).toBe(204)
+      // the response is back while the notice is still pending
+      for (let i = 0; i < 50 && !release; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(postSpy).toHaveBeenCalledTimes(1)
+      release({ data: {} })
+      await flushNotices()
+    })
+  })
+
+  describe('featured links', () => {
+    const adminList = (query = {}) =>
+      request(app)
+        .get('/api/shares/admin')
+        .set('Authorization', `Bearer ${admin}`)
+        .query(query)
+
+    it('PATCH featured: admins only, boolean, sets featuredAt/featuredBy', async () => {
+      const id = await listed(userA)
+      expect((await patch(userA, id, { featured: true })).status).toBe(403)
+      expect((await patch(userB, id, { featured: true })).status).toBe(403)
+      expect((await patch(admin, id, { featured: 'yes' })).status).toBe(400)
+      expect((await patch(admin, id, { featured: 1 })).status).toBe(400)
+      expect((await Share.findById(id).lean()).featured).toBe(false)
+
+      const before = Date.now()
+      const res = await patch(admin, id, { featured: true })
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ id, featured: true, hidden: false })
+      expect(res.body).not.toHaveProperty('featuredBy')
+      let doc = await Share.findById(id).lean()
+      expect(doc.featured).toBe(true)
+      expect(doc.featuredBy).toBe(ADMIN_ID)
+      expect(doc.featuredAt.getTime()).toBeGreaterThanOrEqual(before - 1000)
+
+      const off = await patch(admin, id, { featured: false })
+      expect(off.status).toBe(200)
+      expect(off.body.featured).toBe(false)
+      doc = await Share.findById(id).lean()
+      expect(doc.featured).toBe(false)
+      // dates are kept as history
+      expect(doc.featuredAt).toEqual(expect.any(Date))
+    })
+
+    it('GET /:id, /mine and /search include featured', async () => {
+      const id = await listed(userA, {}, { featured: true })
+      const other = await listed(userA)
+      expect((await request(app).get(`/api/shares/${id}`)).body.featured).toBe(
+        true,
+      )
+      const mine = await request(app)
+        .get('/api/shares/mine')
+        .set('Authorization', `Bearer ${userA}`)
+      const byId = Object.fromEntries(mine.body.map((s) => [s.id, s]))
+      expect(byId[id].featured).toBe(true)
+      expect(byId[other].featured).toBe(false)
+      const res = await search()
+      const items = Object.fromEntries(res.body.items.map((s) => [s.id, s]))
+      expect(items[id].featured).toBe(true)
+      expect(items[other].featured).toBe(false)
+      expect(JSON.stringify(res.body)).not.toContain('featuredBy')
+    })
+
+    it('search featured filter', async () => {
+      const featured = await listed(userA, {}, { featured: true })
+      const normal = await listed(userA)
+      await listed(userA, {}, { featured: true, hidden: true })
+      await make(userA, {}, { featured: true })
+      for (const value of ['1', 'true']) {
+        expect(ids(await search({ featured: value }))).toEqual([featured])
+      }
+      for (const value of ['', '0', 'false']) {
+        expect(ids(await search({ featured: value })).sort()).toEqual(
+          [featured, normal].sort(),
+        )
+      }
+      for (const value of ['yes', '2', 'TRUE']) {
+        expect((await search({ featured: value })).status).toBe(400)
+      }
+      expect(
+        (await request(app).get('/api/shares/search?featured=1&featured=1'))
+          .status,
+      ).toBe(400)
+    })
+
+    it('ranking: featured first without q, small boost with q, ignored by popular/recent', async () => {
+      const now = Date.now()
+      const popular = await listed(
+        userA,
+        { title: 'Gatos' },
+        { visits: 5000, listedAt: new Date(now) },
+      )
+      const featured = await listed(
+        userA,
+        { title: 'Gatos y perros' },
+        { featured: true, listedAt: new Date(now - 400 * DAY) },
+      )
+      const partial = await listed(
+        userA,
+        { title: 'Gatos y ratones' },
+        { listedAt: new Date(now - 400 * DAY) },
+      )
+      expect(ids(await search())).toEqual([featured, popular, partial])
+      // exact title still wins; the boost beats an equal partial match
+      expect(ids(await search({ q: 'gatos' }))).toEqual([
+        popular,
+        featured,
+        partial,
+      ])
+      expect(ids(await search({ sort: 'popular' }))[0]).toBe(popular)
+      expect(ids(await search({ sort: 'recent' }))[0]).toBe(popular)
+    })
+
+    it('admin: featured status, counter and featuredAt', async () => {
+      const id = await listed(userA)
+      await listed(userA)
+      await patch(admin, id, { featured: true })
+      const all = await adminList()
+      expect(all.body.counts).toEqual({
+        all: 2,
+        reported: 0,
+        hidden: 0,
+        listed: 2,
+        featured: 1,
+      })
+      const item = all.body.items.find((i) => i.id === id)
+      expect(item).toMatchObject({
+        featured: true,
+        featuredAt: expect.any(String),
+      })
+      const other = all.body.items.find((i) => i.id !== id)
+      expect(other).toMatchObject({ featured: false, featuredAt: null })
+      const onlyFeatured = await adminList({ status: 'featured' })
+      expect(onlyFeatured.body.items.map((i) => i.id)).toEqual([id])
+      expect(onlyFeatured.body.total).toBe(1)
+    })
+  })
+
   describe('new indexes', () => {
     it('has the search indexes', async () => {
       const indexes = await Share.collection.indexes()
@@ -1328,6 +1739,13 @@ describe('Shares API: listing, search and moderation', () => {
         indexes.some(
           (i) =>
             JSON.stringify(i.key) === JSON.stringify({ listed: 1, ownerId: 1 }),
+        ),
+      ).toBe(true)
+      expect(
+        indexes.some(
+          (i) =>
+            JSON.stringify(i.key) ===
+            JSON.stringify({ listed: 1, hidden: 1, featured: 1 }),
         ),
       ).toBe(true)
     })
