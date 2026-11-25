@@ -13,7 +13,10 @@ const ShareSchema = new Schema(
     generator: { type: String, required: true },
     lang: { type: String },
     title: { type: String, default: '' },
-    pictogramIds: { type: [Number], default: [] },
+    // files in the link's assets folder (SHARES_ASSETS_DIR/<id>/):
+    // the activity capture ('preview.webp', ...) and the author's photos
+    preview: { type: String, default: null },
+    images: { type: [String], default: [] },
     createdAt: { type: Date, default: Date.now },
     lastAccessedAt: { type: Date, default: Date.now },
     visits: { type: Number, default: 0 },

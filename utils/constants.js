@@ -5,6 +5,12 @@ const MATERIAL_DIR = '/materials'
 const MAP_DIR = fs.existsSync('/map')
   ? '/map'
   : path.resolve(__dirname, '../../arasaac-data/map')
+// ARActivities shared links: one folder per link (activity capture and author photos).
+// Mounted as a volume like /map, and served by static.arasaac.org/aractivities
+const ARACTIVITIES_DIR = fs.existsSync('/aractivities')
+  ? '/aractivities'
+  : path.resolve(__dirname, '../../arasaac-data/aractivities')
+const ARACTIVITIES_URL = 'https://static.arasaac.org/aractivities'
 const CONJUGATIONS_DIR = '/conjugations'
 const PUBLISHED = 1
 const LOCUTIONS_DIR = '/locutions'
@@ -72,6 +78,8 @@ module.exports = {
   CATALOG_DIR,
   MATERIAL_DIR,
   MAP_DIR,
+  ARACTIVITIES_DIR,
+  ARACTIVITIES_URL,
   CONJUGATIONS_DIR,
   LOCUTIONS_DIR,
   PUBLISHED,
