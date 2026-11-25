@@ -36,6 +36,24 @@ const ShareSchema = new Schema(
       ],
       default: [],
     },
+    // reports an admin already reviewed (moved here when restoring or dismissing)
+    dismissedReports: {
+      type: [
+        {
+          userId: String,
+          reason: { type: String, maxlength: 300 },
+          at: Date,
+          _id: false,
+        },
+      ],
+      default: [],
+    },
+    // last moderation by an admin: 'hidden' | 'restored' | 'dismissed'
+    moderation: {
+      action: String,
+      by: String,
+      at: Date,
+    },
     // normalized `${title} ${description}` (lowercase, no diacritics)
     searchText: { type: String, default: '' },
   },
@@ -46,6 +64,7 @@ ShareSchema.index({ ownerId: 1, hash: 1 }, { unique: true })
 ShareSchema.index({ ownerId: 1, createdAt: -1 })
 ShareSchema.index({ listed: 1, hidden: 1, generator: 1 })
 ShareSchema.index({ listed: 1, ownerId: 1 })
+ShareSchema.index({ hidden: 1, createdAt: -1 })
 ShareSchema.index(
   { lastAccessedAt: 1 },
   { expireAfterSeconds: SHARE_TTL_SECONDS },

@@ -556,6 +556,200 @@ describe('Shares API: listing, search and moderation', () => {
 
   const ids = (res) => res.body.items.map((i) => i.id)
 
+  describe('administration', () => {
+    const adminList = (query = {}, token = admin) =>
+      request(app)
+        .get('/api/shares/admin')
+        .set('Authorization', `Bearer ${token}`)
+        .query(query)
+
+    const reportBy = (token, id, reason) =>
+      request(app)
+        .post(`/api/shares/${id}/report`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ reason })
+
+    it('only admins can list every link', async () => {
+      expect((await request(app).get('/api/shares/admin')).status).toBe(401)
+      expect((await adminList({}, userA)).status).toBe(403)
+      expect((await adminList()).status).toBe(200)
+    })
+
+    it('lists every link with author email, reports with reporter, and tab counters', async () => {
+      const reported = await listed(userA, { title: 'Bingo granja' })
+      await reportBy(userB, reported, 'Datos de alumnos')
+      const hiddenId = await make(userA, {}, { hidden: true })
+      const unlisted = await make(userA)
+      const res = await adminList()
+      expect(res.status).toBe(200)
+      expect(res.body.total).toBe(3)
+      expect(res.body.counts).toEqual({
+        all: 3,
+        reported: 1,
+        hidden: 1,
+        listed: 1,
+      })
+      const item = res.body.items.find((i) => i.id === reported)
+      const userADoc = await User.findById(USER_A_ID).lean()
+      expect(item).toMatchObject({
+        title: 'Bingo granja',
+        listed: true,
+        hidden: false,
+        reportsCount: 1,
+        dismissedReportsCount: 0,
+        moderation: null,
+        url: `https://aractivities.arasaac.org/s/${reported}`,
+        image: `https://privateapi.arasaac.org/api/shares/${reported}/og.png`,
+        author: { id: USER_A_ID, name: 'Normal User', email: userADoc.email },
+      })
+      expect(item.reports).toEqual([
+        {
+          reason: 'Datos de alumnos',
+          at: expect.any(String),
+          user: expect.objectContaining({ id: '60d5ec49f1b2c82d88c8888b' }),
+        },
+      ])
+      expect(item).not.toHaveProperty('data')
+      expect(res.body.items.map((i) => i.id)).toEqual(
+        expect.arrayContaining([hiddenId, unlisted]),
+      )
+    })
+
+    it('filters by status, type, author and text (words, link id or author)', async () => {
+      const a = await listed(userA, { title: 'Animales de la granja' })
+      const b = await make(
+        userB,
+        { title: 'Rutina', generator: 'timetable' },
+        { hidden: true },
+      )
+      await reportBy(userC, a, '')
+      const ids = (res) => res.body.items.map((i) => i.id).sort()
+      expect(ids(await adminList({ status: 'reported' }))).toEqual([a])
+      expect(ids(await adminList({ status: 'hidden' }))).toEqual([b])
+      expect(ids(await adminList({ status: 'listed' }))).toEqual([a])
+      expect(ids(await adminList({ status: 'unlisted' }))).toEqual([b])
+      expect(ids(await adminList({ generator: 'timetable' }))).toEqual([b])
+      expect(ids(await adminList({ author: USER_A_ID }))).toEqual([a])
+      expect(ids(await adminList({ q: 'granj' }))).toEqual([a])
+      expect(ids(await adminList({ q: b }))).toEqual([b])
+      expect(ids(await adminList({ q: 'Normal User' }))).toEqual([a])
+      // counters follow the text filter
+      expect((await adminList({ q: 'granj' })).body.counts).toEqual({
+        all: 1,
+        reported: 1,
+        hidden: 0,
+        listed: 1,
+      })
+    })
+
+    it('sorts by reports, visits and copies, and paginates', async () => {
+      const few = await listed(userA, {}, { visits: 50, copies: 1 })
+      const many = await listed(userA, {}, { visits: 5, copies: 9 })
+      await reportBy(userB, many, '')
+      await reportBy(userC, many, '')
+      await reportBy(userB, few, '')
+      const order = async (sort) =>
+        (await adminList({ sort })).body.items.map((i) => i.id)
+      expect(await order('reports')).toEqual([many, few])
+      expect(await order('visits')).toEqual([few, many])
+      expect(await order('copies')).toEqual([many, few])
+      const page2 = await adminList({ sort: 'visits', limit: '1', page: '2' })
+      expect(page2.body).toMatchObject({ total: 2, page: 2, limit: 1 })
+      expect(page2.body.items.map((i) => i.id)).toEqual([many])
+    })
+
+    it('rejects invalid parameters', async () => {
+      for (const query of [
+        { status: 'x' },
+        { sort: 'x' },
+        { generator: 'x' },
+        { author: 'x' },
+        { limit: '101' },
+        { page: '0' },
+      ]) {
+        expect((await adminList(query)).status).toBe(400)
+      }
+    })
+
+    it('restoring a link moves its reports to the history, so they do not hide it again', async () => {
+      process.env.SHARES_REPORT_HIDE_THRESHOLD = '2'
+      const id = await listed(userA)
+      await reportBy(userB, id, 'uno')
+      await reportBy(userC, id, 'dos')
+      expect((await Share.findById(id).lean()).hidden).toBe(true)
+
+      const res = await patch(admin, id, { hidden: false })
+      expect(res.status).toBe(200)
+      const doc = await Share.findById(id).lean()
+      expect(doc.hidden).toBe(false)
+      expect(doc.reports).toEqual([])
+      expect(doc.dismissedReports.map((r) => r.reason)).toEqual(['uno', 'dos'])
+      expect(doc.moderation).toMatchObject({ action: 'restored', by: ADMIN_ID })
+
+      // one new report is not enough to hide it again
+      await reportBy(userD, id, 'tres')
+      expect((await Share.findById(id).lean()).hidden).toBe(false)
+      const listedItem = (await adminList({ status: 'reported' })).body.items[0]
+      expect(listedItem).toMatchObject({
+        reportsCount: 1,
+        dismissedReportsCount: 2,
+      })
+      expect(listedItem.moderation).toMatchObject({
+        action: 'restored',
+        by: { id: ADMIN_ID },
+      })
+    })
+
+    it('an admin can dismiss reports without hiding, or hide it', async () => {
+      const id = await listed(userA)
+      await reportBy(userB, id, 'spam')
+      const dismissed = await patch(admin, id, { dismissReports: true })
+      expect(dismissed.status).toBe(200)
+      let doc = await Share.findById(id).lean()
+      expect(doc.reports).toEqual([])
+      expect(doc.hidden).toBe(false)
+      expect(doc.moderation.action).toBe('dismissed')
+
+      await patch(admin, id, { hidden: true })
+      doc = await Share.findById(id).lean()
+      expect(doc.hidden).toBe(true)
+      expect(doc.moderation.action).toBe('hidden')
+
+      expect((await patch(userA, id, { dismissReports: true })).status).toBe(
+        403,
+      )
+      expect((await patch(admin, id, { dismissReports: 'yes' })).status).toBe(
+        400,
+      )
+    })
+
+    it('an admin can delete any link; other users cannot', async () => {
+      const id = await make(userA)
+      const del = (token) =>
+        request(app)
+          .delete(`/api/shares/${id}`)
+          .set('Authorization', `Bearer ${token}`)
+      expect((await del(userB)).status).toBe(403)
+      expect((await del(admin)).status).toBe(204)
+      expect(await Share.findById(id).lean()).toBeNull()
+    })
+
+    it('moderation data never reaches the author or the public', async () => {
+      const id = await listed(userA)
+      await reportBy(userB, id, 'x')
+      await patch(admin, id, { hidden: true })
+      const mine = await request(app)
+        .get('/api/shares/mine')
+        .set('Authorization', `Bearer ${userA}`)
+      expect(mine.body[0]).not.toHaveProperty('reports')
+      expect(mine.body[0]).not.toHaveProperty('moderation')
+      expect(mine.body[0]).not.toHaveProperty('dismissedReports')
+      const pub = await request(app).get(`/api/shares/${id}`)
+      expect(pub.body).not.toHaveProperty('moderation')
+      expect(pub.body).not.toHaveProperty('dismissedReports')
+    })
+  })
+
   describe('POST /api/shares with description', () => {
     it('stores description and searchText, returns the new fields', async () => {
       const res = await post(

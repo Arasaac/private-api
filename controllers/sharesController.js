@@ -12,6 +12,7 @@ const User = require('../models/User')
 const logger = require('../utils/logger')
 const {
   normalizeText,
+  escapeRegex,
   buildSearchText,
   tokenize,
   prefixPattern,
@@ -622,7 +623,14 @@ const mineItem = (s) => ({
   hidden: !!s.hidden,
 })
 
-const LIST_PROJECTION = { data: 0, reports: 0, searchText: 0, hash: 0 }
+const LIST_PROJECTION = {
+  data: 0,
+  reports: 0,
+  dismissedReports: 0,
+  moderation: 0,
+  searchText: 0,
+  hash: 0,
+}
 
 const create = async (req, res) => {
   logger.debug('EXEC create sharesController')
@@ -731,11 +739,12 @@ const mine = async (req, res) => {
 const update = async (req, res) => {
   const { id } = req.params
   if (!ID_REGEX.test(id)) return res.status(404).json({ error: 'Not found' })
-  const { listed, description, hidden } = req.body || {}
+  const { listed, description, hidden, dismissReports } = req.body || {}
   if (
     (listed !== undefined && typeof listed !== 'boolean') ||
     (description !== undefined && typeof description !== 'string') ||
-    (hidden !== undefined && typeof hidden !== 'boolean')
+    (hidden !== undefined && typeof hidden !== 'boolean') ||
+    (dismissReports !== undefined && typeof dismissReports !== 'boolean')
   ) {
     return res.status(400).json({ error: 'Invalid fields' })
   }
@@ -746,11 +755,16 @@ const update = async (req, res) => {
       listed: 1,
       description: 1,
       searchText: 1,
+      hidden: 1,
+      reports: 1,
     }).lean()
     if (!share) return res.status(404).json({ error: 'Not found' })
     const isAdmin = req.user.role === 'admin'
     const isOwner = share.ownerId === req.user.id
-    if ((!isOwner && !isAdmin) || (hidden !== undefined && !isAdmin)) {
+    if (
+      (!isOwner && !isAdmin) ||
+      ((hidden !== undefined || dismissReports !== undefined) && !isAdmin)
+    ) {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
@@ -766,17 +780,30 @@ const update = async (req, res) => {
       // Links created before the search existed have no searchText yet
       $set.searchText = buildSearchText(share.title, share.description || '')
     }
-    if (hidden !== undefined) {
-      $set.hidden = hidden
-      logger.info(`Share ${id} hidden=${hidden} by admin ${req.user.id}`)
+    const update = {}
+    if (hidden !== undefined || dismissReports === true) {
+      const restoring = hidden === false && share.hidden === true
+      let action = 'dismissed'
+      if (hidden === true) action = 'hidden'
+      else if (restoring) action = 'restored'
+      if (hidden !== undefined) $set.hidden = hidden
+      // Reviewed reports move to the history, so they do not hide it again
+      if (restoring || dismissReports === true) {
+        const pending = share.reports || []
+        $set.reports = []
+        if (pending.length)
+          update.$push = { dismissedReports: { $each: pending } }
+      }
+      $set.moderation = { action, by: String(req.user.id), at: new Date() }
+      logger.info(`Share ${id} ${action} by admin ${req.user.id}`)
     }
+    if (Object.keys($set).length) update.$set = $set
 
-    const updated = Object.keys($set).length
-      ? await Share.findOneAndUpdate(
-          { _id: id },
-          { $set },
-          { new: true, projection: LIST_PROJECTION },
-        ).lean()
+    const updated = Object.keys(update).length
+      ? await Share.findOneAndUpdate({ _id: id }, update, {
+          new: true,
+          projection: LIST_PROJECTION,
+        }).lean()
       : await Share.findById(id, LIST_PROJECTION).lean()
     if (!updated) return res.status(404).json({ error: 'Not found' })
     return res.status(200).json(mineItem(updated))
@@ -960,11 +987,15 @@ const remove = async (req, res) => {
   try {
     const share = await Share.findById(id, { ownerId: 1 }).lean()
     if (!share) return res.status(404).json({ error: 'Not found' })
-    if (share.ownerId !== req.user.id) {
+    const isAdmin = req.user.role === 'admin'
+    if (share.ownerId !== req.user.id && !isAdmin) {
       return res.status(403).json({ error: 'Forbidden' })
     }
-    await Share.deleteOne({ _id: id, ownerId: req.user.id })
+    await Share.deleteOne({ _id: id })
     await removeOgCache(id)
+    if (share.ownerId !== req.user.id) {
+      logger.info(`Share ${id} deleted by admin ${req.user.id}`)
+    }
     return res.status(204).end()
   } catch (error) {
     logger.error(`Error deleting share: ${error.message}`)
@@ -1026,7 +1057,196 @@ const page = async (req, res) => {
   }
 }
 
+// ---- administration ----
+
+const ADMIN_STATUSES = ['all', 'reported', 'hidden', 'listed', 'unlisted']
+const ADMIN_SORTS = ['recent', 'reports', 'visits', 'copies']
+const ADMIN_MAX_LIMIT = 100
+const ADMIN_DEFAULT_LIMIT = 25
+const ADMIN_USER_FIELDS = {
+  name: 1,
+  email: 1,
+  pictureProvider: 1,
+  'google.picture': 1,
+}
+
+const statusFilter = (status) => {
+  switch (status) {
+    case 'reported':
+      return { 'reports.0': { $exists: true } }
+    case 'hidden':
+      return { hidden: true }
+    case 'listed':
+      return { listed: true, hidden: { $ne: true } }
+    case 'unlisted':
+      return { listed: { $ne: true } }
+    default:
+      return {}
+  }
+}
+
+// Text: words in title/description, a link id, or an author's name or email
+const adminTextFilter = async (q) => {
+  const text = q.trim()
+  if (!text) return {}
+  const or = []
+  if (ID_REGEX.test(text)) or.push({ _id: text })
+  const tokens = tokenize(normalizeText(text))
+  if (tokens.length) {
+    or.push({
+      $and: tokens.map((token) => ({
+        searchText: { $regex: prefixPattern(token) },
+      })),
+    })
+    or.push({ title: { $regex: escapeRegex(text), $options: 'i' } })
+  }
+  const users = await User.find(
+    {
+      $or: [
+        { email: { $regex: `^${escapeRegex(text)}`, $options: 'i' } },
+        { name: { $regex: escapeRegex(text), $options: 'i' } },
+      ],
+    },
+    { _id: 1 },
+  )
+    .limit(200)
+    .lean()
+  if (users.length)
+    or.push({ ownerId: { $in: users.map((u) => String(u._id)) } })
+  return or.length ? { $or: or } : { _id: null }
+}
+
+const adminSort = (sort) => {
+  switch (sort) {
+    case 'reports':
+      return { reportsCount: -1, createdAt: -1 }
+    case 'visits':
+      return { visits: -1, createdAt: -1 }
+    case 'copies':
+      return { copies: -1, createdAt: -1 }
+    default:
+      return { createdAt: -1 }
+  }
+}
+
+const adminPerson = (id, user) => ({
+  id: String(id),
+  name: (user && user.name) || '',
+  email: (user && user.email) || '',
+  picture: pictureFor(user),
+})
+
+const adminReport = (report, users) => ({
+  reason: report.reason || '',
+  at: report.at,
+  user: adminPerson(report.userId, users.get(String(report.userId))),
+})
+
+// GET /shares/admin (admins): every link, with reports and moderation
+const adminList = async (req, res) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
+  const query = req.query || {}
+  const status = isGiven(query.status) ? query.status : 'all'
+  const sort = isGiven(query.sort) ? query.sort : 'recent'
+  const page = parsePositiveInt(query.page, 1)
+  const limit = parsePositiveInt(query.limit, ADMIN_DEFAULT_LIMIT)
+  if (
+    !ADMIN_STATUSES.includes(status) ||
+    !ADMIN_SORTS.includes(sort) ||
+    (query.q !== undefined && typeof query.q !== 'string') ||
+    (isGiven(query.generator) && !GENERATORS.includes(query.generator)) ||
+    (isGiven(query.author) && !USER_ID_REGEX.test(query.author)) ||
+    !Number.isInteger(page) ||
+    page < 1 ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > ADMIN_MAX_LIMIT
+  ) {
+    return res.status(400).json({ error: 'Invalid parameters' })
+  }
+  try {
+    const base = {}
+    if (isGiven(query.generator)) base.generator = query.generator
+    if (isGiven(query.author)) base.ownerId = query.author
+    const text = await adminTextFilter((query.q || '').slice(0, 100))
+    const match = { $and: [base, text, statusFilter(status)] }
+
+    const [result] = await Share.aggregate([
+      { $match: match },
+      { $project: { data: 0, hash: 0, searchText: 0 } },
+      {
+        $addFields: { reportsCount: { $size: { $ifNull: ['$reports', []] } } },
+      },
+      { $sort: adminSort(sort) },
+      {
+        $facet: {
+          items: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+          total: [{ $count: 'n' }],
+        },
+      },
+    ])
+    const shares = (result && result.items) || []
+    const total = (result && result.total[0] && result.total[0].n) || 0
+
+    // tab counters, with the same text/type/author filters
+    const [all, reported, hidden, listed] = await Promise.all(
+      ['all', 'reported', 'hidden', 'listed'].map((s) =>
+        Share.countDocuments({ $and: [base, text, statusFilter(s)] }),
+      ),
+    )
+
+    const userIds = []
+    shares.forEach((s) => {
+      userIds.push(s.ownerId)
+      ;(s.reports || []).forEach((r) => userIds.push(r.userId))
+      if (s.moderation && s.moderation.by) userIds.push(s.moderation.by)
+    })
+    const valid = [...new Set(userIds.map(String))].filter((id) =>
+      USER_ID_REGEX.test(id),
+    )
+    const users = new Map(
+      (valid.length
+        ? await User.find({ _id: { $in: valid } }, ADMIN_USER_FIELDS).lean()
+        : []
+      ).map((u) => [String(u._id), u]),
+    )
+
+    return res.status(200).json({
+      total,
+      page,
+      limit,
+      counts: { all, reported, hidden, listed },
+      items: shares.map((s) => ({
+        ...mineItem(s),
+        url: `${FRONT_URL}/${s._id}`,
+        image: `${API_URL}/${s._id}/og.png`,
+        author: adminPerson(s.ownerId, users.get(String(s.ownerId))),
+        reportsCount: s.reportsCount || 0,
+        reports: (s.reports || []).map((r) => adminReport(r, users)),
+        dismissedReportsCount: (s.dismissedReports || []).length,
+        moderation:
+          s.moderation && s.moderation.action
+            ? {
+                action: s.moderation.action,
+                at: s.moderation.at,
+                by: adminPerson(
+                  s.moderation.by,
+                  users.get(String(s.moderation.by)),
+                ),
+              }
+            : null,
+      })),
+    })
+  } catch (error) {
+    logger.error(`Error listing shares for admin: ${error.message}`)
+    return res.status(500).json({ error: 'Error listing shares' })
+  }
+}
+
 module.exports = {
+  adminList,
   create,
   mine,
   update,

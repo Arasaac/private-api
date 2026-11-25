@@ -17,6 +17,11 @@ router.get('/mine', auth, (req, res) => {
   sharesController.mine(req, res)
 })
 
+// admins: every link, with reports (must be before '/:id')
+router.get('/admin', auth, (req, res) => {
+  sharesController.adminList(req, res)
+})
+
 // public: listed links (must be before '/:id')
 router.get('/search', (req, res) => {
   sharesController.search(req, res)
